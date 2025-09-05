@@ -16,10 +16,13 @@ mod tests {
     fn test_machine_run() {
         let mut mach = VM::new();
 
-        let code = [0x08, 0xDF]
+        // Compiled from assembler.py
+        let bytes = include_bytes!("../files/test.bc");
+
+        let code = bytes
             .iter()
             .cloned()
-            .chain(std::iter::repeat(0xFF).take(16))
+            //.chain(std::iter::repeat(0x00).take(16))
             .collect::<Vec<u8>>();
 
         mach.run_with(&code);
