@@ -3,6 +3,19 @@
 //! Core of the Cupid language VM
 //! Our VM is a trivial stack machine which executes its bytecode
 
+#[macro_export]
+macro_rules! construct_vm_addr {
+    ($address_bytes:expr) => {{
+        // Convert to a u32
+        let mut address = 0u32;
+        for &byte in &$address_bytes {
+            address = (address << 8) | (byte as u32);
+        }
+
+        address
+    }};
+}
+
 use crate::runtime::disasm;
 use std::collections::HashSet;
 
@@ -126,10 +139,10 @@ impl VM {
         match opcode {
             0x00 => 0, // nop
             0x01 => 1, // pushi <value>
-            0x02 => 1, // pushsz <value>
+            0x02 => 0, // pushsz <value>, handled specially
             0x03 => 0, // popi
             0x04 => 0, // popsz
-            0x08 => 1, // jmp <address>
+            0x08 => 0, // jmp <address>
             0x09 => 1, // jmp <offset>
             0x0A => 1, // jeq <address>
             0x0B => 1, // jne <address>
@@ -138,7 +151,7 @@ impl VM {
             0x0E => 0, // mul
             0x0F => 0, // div
             0x10 => 1, // call <address>
-            0x11 => 1, // callnat <native>
+            0x11 => 0, // callnat <name>, handled specially
             0x12 => 0, // ret
             0xFF => 0, // halt
             _ => 0,
@@ -148,11 +161,55 @@ impl VM {
     fn fetch_decode(&mut self) -> VMOp {
         // Determine the number of operands and read that many
         let opcode = self.program[self.ip as usize];
-        let operand_count = self.operand_count(opcode);
         let mut operands = Vec::new();
 
-        for i in 1..=operand_count {
-            operands.push(self.program[self.ip as usize + i] as u32);
+        println!("fetch_decode: called for {:?}", opcode);
+
+        match opcode {
+            0x02 => {
+                // pushsz <value>: read until null byte
+                let mut i = 1;
+                while (self.ip as usize + i) < self.program.len()
+                    && self.program[self.ip as usize + i] != 0
+                {
+                    let next = self.program[self.ip as usize + i] as u32;
+                    operands.push(next);
+                    i += 1;
+                }
+            }
+
+            0x08 | 0x10 | 0x0A | 0x0B => {
+                // jmp: read until null byte as address
+                // jeq: read until null byte as address
+                // jne: read until null byte as address
+                // call: read until null byte as address
+                println!("fetch_decode: reading operands for {:?}", opcode);
+
+                // Read until NUL byte
+                let mut i = 1;
+                while (self.ip as usize + i) < self.program.len()
+                    && self.program[self.ip as usize + i] != 0
+                {
+                    let next = self.program[self.ip as usize + i] as u32;
+                    operands.push(next);
+                    i += 1;
+                }
+
+                // Convert individual bytes back to address (big-endian)
+                let address = construct_vm_addr!(operands);
+
+                println!("fetch_decode: final address {:08X}", address);
+
+                // Replace operands with single address value
+                operands.clear();
+                operands.push(address);
+            }
+            _ => {
+                let operand_count = self.operand_count(opcode);
+                for i in 1..=operand_count {
+                    operands.push(self.program[self.ip as usize + i] as u32);
+                }
+            }
         }
 
         VMOp {
@@ -214,8 +271,8 @@ impl VM {
             }
             Op::PUSH_SZ => {
                 // pushsz "<value>" - push string literal onto stack
-                let value = mach_op.operands[0];
-                self.stack.push(VMValue::String(vec![value as u8]));
+                let string_bytes: Vec<u8> = mach_op.operands.iter().map(|&x| x as u8).collect();
+                self.stack.push(VMValue::String(string_bytes));
             }
             Op::POP_I => {
                 // popi - pop immediate value from stack, store in ac
@@ -238,7 +295,11 @@ impl VM {
             // Jumping
             Op::JMP_ABS => {
                 // jmp $<address> - absolute jump
-                let address = mach_op.operands[0];
+                let address_bytes: Vec<u8> = mach_op.operands[0].to_be_bytes().to_vec();
+
+                // Convert to a u32
+                let address = construct_vm_addr!(address_bytes);
+
                 self.ip = address;
             }
             Op::JMP_REL => {
@@ -248,14 +309,18 @@ impl VM {
             }
             Op::JMP_EQ => {
                 // jeq <address> - jump if ac == 0
-                let address = mach_op.operands[0];
+                let address_bytes: Vec<u8> = mach_op.operands[0].to_be_bytes().to_vec();
+                let address = construct_vm_addr!(address_bytes);
+
                 if self.ac == 0 {
                     self.ip = address;
                 }
             }
             Op::JMP_NE => {
                 // jne <address> - jump if ac != 0
-                let address = mach_op.operands[0];
+                let address_bytes: Vec<u8> = mach_op.operands[0].to_be_bytes().to_vec();
+                let address = construct_vm_addr!(address_bytes);
+
                 if self.ac != 0 {
                     self.ip = address;
                 }
@@ -333,7 +398,18 @@ impl VM {
         self.execute(mach_op);
 
         match opcode {
-            0x08 | 0x09 | 0x0A | 0x0B | 0x10 | 0x12 => {
+            0x02 | 0x08 => {
+                // Step past the entire instruction including null terminator
+                let mut i = 1;
+                while (self.ip as usize + i) < self.program.len()
+                    && self.program[self.ip as usize + i] != 0
+                {
+                    i += 1;
+                }
+                self.ip += i as u32 + 1; // +1 for null terminator
+            }
+
+            0x09 | 0x0A | 0x0B | 0x10 | 0x12 => {
                 // These opcodes modify ip directly, so we don't step here
             }
             _ => {

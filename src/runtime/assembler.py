@@ -75,26 +75,43 @@ class Assembler:
         normalized_op_name = self.normalize_op_name(op_name)
         translated_operand = None
 
+        op = Op[normalized_op_name]
+        address = 0x0
+
         # Handle jump specially
         if op_name.lower() == 'jmp':
             # jmp to label, otherwise <address>
             if operand in self.labels:
                 translated_operand = self.labels[operand]
             elif operand and any(c.isdigit() for c in operand):
-                translated_operand = int(operand, 16)
+                address = int(operand, 16)
             else:
                 raise ValueError(f'Invalid operand: {operand}')
+            
+        
+            # Generate bytes without leading zeros
+            if address == 0:
+                return (op.value, 0)  # Just the null terminator for address 0
+            else:
+                bytes_needed = []
+                temp = address
+                while temp > 0:
+                    bytes_needed.insert(0, temp & 0xFF)
+                    temp >>= 8
+                return (op.value, *bytes_needed, 0)
 
-        elif operand is not None:
+
+        if operand is not None:
             if any(c.isdigit() for c in operand):
                 translated_operand = int(operand, 16)
             else:
                 if isinstance(operand, str) and (operand.startswith('"') and operand.endswith('"')):
-                    translated_operand = operand.strip('"').encode() + b'\x00'  # null-terminated
+                    string_literal = operand.strip('"')
+                    string_bytes = string_literal.encode() + b'\x00'  # null-terminated
+                    return (op.value, *string_bytes, 0)
                 else:
                     translated_operand = operand.encode() + b'\x00'  # null-terminated
 
-        op = Op[normalized_op_name]
         print(f'{normalized_op_name} → {op.value:02X} {translated_operand if translated_operand is not None else ''}')
         if operand is not None:
             return (op.value, translated_operand)
