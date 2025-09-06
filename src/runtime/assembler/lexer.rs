@@ -20,6 +20,17 @@ pub struct Token {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
+    // Operators
+    Plus,    // +
+    Minus,   // -
+    Star,    // *
+    Slash,   // /
+    LParen,  // (
+    RParen,  // )
+    LSquare, // [
+    RSquare, // ]
+    Comma,   // ,
+
     Instruction,       // pushi <value>, pushac
     Directive(String), // %include "file"
     Label(String),     // name:
@@ -27,7 +38,7 @@ pub enum TokenKind {
     Int(u32),
     Ident(String),
     String,
-    ByteSeq, // 0x01 0x02 ...
+    ByteSeq(Vec<u8>), // 0x01 0x02 ...
 }
 
 impl<'l> Lexer<'l> {
@@ -52,6 +63,14 @@ impl<'l> Lexer<'l> {
 
     fn peek_ahead(&self, offset: usize) -> char {
         self.src.chars().nth(self.pos + offset).unwrap_or('\0')
+    }
+
+    // Helper to push a token, without a specific literal value
+    fn push(&mut self, token: TokenKind, tokens: &mut Vec<Token>) {
+        tokens.push(Token {
+            kind: token.clone(),
+            literal: format!("{:?}", token),
+        });
     }
 
     /// Peek, advance and return the peeked character.
@@ -119,6 +138,40 @@ impl<'l> Lexer<'l> {
         Token {
             kind: TokenKind::Int(int_value),
             literal: value,
+        }
+    }
+
+    fn lex_byte_seq(&mut self) -> Token {
+        let mut bytes = Vec::new();
+
+        self.eat_whitespace();
+
+        while self.peek() != ']' && self.peek() != '\0' {
+            match self.peek() {
+                ' ' | '\t' => {
+                    self.advance();
+                }
+                '0'..'9' => {
+                    let digit = self.advance();
+                    let num_token = self.lex_number(digit);
+
+                    if let TokenKind::Int(b) = num_token.kind {
+                        if b > 0xFF {
+                            panic!("Byte value out of range: {}", b);
+                        }
+                        bytes.push(b as u8);
+                    }
+                }
+
+                _ => {
+                    panic!("Unexpected character in byte sequence");
+                }
+            }
+        }
+
+        Token {
+            kind: TokenKind::ByteSeq(bytes.clone()),
+            literal: format!("{:?}", bytes),
         }
     }
 
@@ -228,15 +281,54 @@ impl<'l> Lexer<'l> {
         loop {
             let c = self.peek();
             match c {
+                '\0' => break,
                 '/' if self.peek_ahead(1) == '/' => {
                     // Skip line comment
                     while self.peek() != '\n' && self.peek() != '\0' {
                         self.advance();
                     }
                 }
-                '\0' | '\r' | '\n' => break,
-                ' ' | '\t' => {
+                ' ' | '\t' | '\r' | '\n' => {
                     self.advance();
+                    self.eat_whitespace();
+                }
+
+                // Operators
+                '+' => {
+                    self.advance();
+                    self.push(TokenKind::Plus, &mut tokens);
+                }
+                '-' => {
+                    self.advance();
+                    self.push(TokenKind::Minus, &mut tokens);
+                }
+                '*' => {
+                    self.advance();
+                    self.push(TokenKind::Star, &mut tokens);
+                }
+                '/' => {
+                    self.advance();
+                    self.push(TokenKind::Slash, &mut tokens);
+                }
+                '(' => {
+                    self.advance();
+                    self.push(TokenKind::LParen, &mut tokens);
+                }
+                ')' => {
+                    self.advance();
+                    self.push(TokenKind::RParen, &mut tokens);
+                }
+                '[' => {
+                    self.advance();
+                    tokens.push(self.lex_byte_seq());
+                }
+                // ']' => {
+                //     self.advance();
+                //     self.push(TokenKind::RSquare, &mut tokens);
+                // }
+                ',' => {
+                    self.advance();
+                    self.push(TokenKind::Comma, &mut tokens);
                 }
 
                 '0'..='9' => {
@@ -251,6 +343,8 @@ impl<'l> Lexer<'l> {
                     println!("lex_value: reading a directive");
                     tokens.extend(self.lex_directive());
                 }
+
+                // Identifiers/Keywords/Labels
                 _ if c.is_alphabetic() || c == '_' => {
                     tokens.push(self.lex_ident_like());
                 }
@@ -296,6 +390,15 @@ mod tests {
         assert_eq!(decimal.kind, TokenKind::Int(123));
         assert_eq!(hex.kind, TokenKind::Int(0xFF));
         assert_eq!(binary.kind, TokenKind::Int(0b0010));
+    }
+
+    #[test]
+    fn lex_byte_sequence() {
+        let mut lex = make_lexer("[0x01 0x02 0x03]");
+        let mut tokens = lex.lex();
+
+        let byte_seq = tokens.next().unwrap();
+        assert!(matches!(byte_seq.kind, TokenKind::ByteSeq(_)));
     }
 
     #[test]

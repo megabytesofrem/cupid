@@ -26,7 +26,7 @@ pub enum Op {
 
     // Memory
     PUSH_I = 0x01,
-    PUSH_SZ = 0x02,
+    PUSHSZ = 0x02,
     PUSHAC = 0x03,
     POP_I = 0x04,
     POP_SZ = 0x05,
@@ -34,8 +34,8 @@ pub enum Op {
     // Jumping
     JMP_ABS = 0x08,
     JMP_REL = 0x09,
-    JMP_EQ = 0x0A,
-    JMP_NE = 0x0B,
+    JEQ = 0x0A,
+    JNE = 0x0B,
 
     // Math
     ADD = 0x0C,
@@ -100,15 +100,15 @@ impl From<u8> for Op {
         match byte {
             0x00 => Op::NOP,
             0x01 => Op::PUSH_I,
-            0x02 => Op::PUSH_SZ,
+            0x02 => Op::PUSHSZ,
             0x03 => Op::PUSHAC,
             0x04 => Op::POP_I,
             0x05 => Op::POP_SZ,
             // Jumping
             0x08 => Op::JMP_ABS,
             0x09 => Op::JMP_REL,
-            0x0A => Op::JMP_EQ,
-            0x0B => Op::JMP_NE,
+            0x0A => Op::JEQ,
+            0x0B => Op::JNE,
             0xFF => Op::HALT,
             0x0C => Op::ADD,
             0x0D => Op::SUB,
@@ -273,7 +273,7 @@ impl VM {
                 let value = mach_op.operands[0];
                 self.stack.push(VMValue::Int(value));
             }
-            Op::PUSH_SZ => {
+            Op::PUSHSZ => {
                 // pushsz "<value>" - push string literal onto stack
                 let string_bytes: Vec<u8> = mach_op.operands.iter().map(|&x| x as u8).collect();
                 self.stack.push(VMValue::String(string_bytes));
@@ -311,7 +311,7 @@ impl VM {
                 let offset = mach_op.operands[0];
                 self.ip = self.ip.wrapping_add(offset);
             }
-            Op::JMP_EQ => {
+            Op::JEQ => {
                 // jeq <address> - jump if ac == 0
                 let address = mach_op.operands[0];
 
@@ -319,7 +319,7 @@ impl VM {
                     self.ip = address;
                 }
             }
-            Op::JMP_NE => {
+            Op::JNE => {
                 // jne <address> - jump if ac != 0
                 let address = mach_op.operands[0];
 
