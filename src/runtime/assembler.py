@@ -11,17 +11,20 @@ import sys
 class Op(Enum):
     NOP = 0x00
     PUSHI = 0x01
-    PUSH_SZ = 0x02
+    PUSHSZ = 0x02
     POPI = 0x03
-    POP_SZ = 0x04
+    POPSZ = 0x04
     JMP_ABS = 0x08
     JMP_REL = 0x09
-    JEQ = 0x0A
-    JNE = 0x0B
+    JMP_EQ = 0x0A
+    JMP_NE = 0x0B
     ADD = 0x0C
     SUB = 0x0D
     MUL = 0x0E
     DIV = 0x0F
+    CALL = 0x10
+    CALLNAT = 0x11
+    RET = 0x12
     HALT = 0xFF
 
 class OperandType(Enum):
@@ -86,7 +89,10 @@ class Assembler:
             if any(c.isdigit() for c in operand):
                 translated_operand = int(operand, 16)
             else:
-                translated_operand = operand.encode()
+                if isinstance(operand, str) and (operand.startswith('"') and operand.endswith('"')):
+                    translated_operand = operand.strip('"').encode() + b'\x00'  # null-terminated
+                else:
+                    translated_operand = operand.encode() + b'\x00'  # null-terminated
 
         op = Op[normalized_op_name]
         print(f'{normalized_op_name} → {op.value:02X} {translated_operand if translated_operand is not None else ''}')
@@ -119,7 +125,17 @@ class Assembler:
         # Flatten output
         flat_output = []
         for item in self.output:
-            flat_output.extend(item)
+            if isinstance(item, tuple):
+                for subitem in item:
+                    if isinstance(subitem, bytes):
+                        flat_output.extend(subitem)
+                    else:
+                        flat_output.append(subitem)
+            else:
+                if isinstance(item, bytes):
+                    flat_output.extend(item)
+                else:
+                    flat_output.append(item)
 
         return bytes(flat_output)
     
@@ -149,7 +165,7 @@ if __name__ == '__main__':
     print('================================')
 
     if sys.argv[2]:
-        print('Writing bytecode to ', sys.argv[2])
+        print('Writing bytecode to', sys.argv[2])
         output_file = open(sys.argv[2], 'wb')
         output_file.write(bytecode)
         output_file.close()
@@ -157,10 +173,14 @@ if __name__ == '__main__':
 '''
 
 VM output:
-0000: 01 : pushi 4    04 : $04    01 : pushi 2    02 : pushsz '12'    0C : $0C    03 : $03    08 : jmp $0008    08 : jmp $0008    
-0008: 08 : jmp $00FF    FF : $FF    00 : $00    00 : $00    00 : $00    00 : $00    00 : $00    00 : $00    
-0010: 00 : $00    00 : $00    00 : $00    00 : $00    00 : $00    00 : $00    00 : $00    00 : $00    
-0018: 00 : $00    00 : $00                   
+ip: 00FF
+sp: 0000
+ac: 0006
+bp: 0000
+--------------------------
+0000: 01 04 : pushi 4    01 02 : pushi 2    0C : add    03 : $03    08 08 : jmp $0008    
+0008: 08 FF : jmp $00FF    
+
 
 Bytecode:
 

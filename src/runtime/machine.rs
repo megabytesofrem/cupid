@@ -28,6 +28,12 @@ pub enum Op {
     SUB = 0x0D,
     MUL = 0x0E,
     DIV = 0x0F,
+
+    // Calls
+    CALL = 0x10,
+    CALL_NAT = 0x11,
+    RET = 0x12,
+
     HALT = 0xFF,
 }
 
@@ -35,26 +41,44 @@ pub enum Op {
 #[derive(Debug, Clone)]
 pub struct VMOp {
     opcode: Op,
-    operands: Vec<u16>,
+    operands: Vec<u32>,
 }
 
 /// A managed value in the VM
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VMValue {
-    Int(u16),
+    Int(u32),
     String(Vec<u8>),
     Data(Vec<u8>),
 }
 
 #[derive(Debug, Clone)]
+pub struct Function {
+    pub address: u32,
+    pub arity: u8,
+    pub local_count: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CallFrame {
+    pub function_id: u32,
+    pub return_address: u32,
+    pub base_ptr: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct VM {
-    pub ip: u16, // instruction pointer
-    pub sp: u16, // stack pointer
-    pub ac: u16, // accumulator
+    pub ip: u32, // instruction pointer
+    pub sp: u32, // stack pointer
+    pub ac: u32, // accumulator
+    pub bp: u32, // base pointer for current call frame
 
     pub program: Vec<u8>,
-    strings: HashSet<(u16, Vec<u8>)>,
-    stack: Vec<VMValue>,
+    pub function_table: Vec<Function>,
+    pub call_stack: Vec<CallFrame>,
+
+    pub strings: HashSet<(u32, Vec<u8>)>,
+    pub stack: Vec<VMValue>,
 }
 
 impl From<u8> for Op {
@@ -74,6 +98,9 @@ impl From<u8> for Op {
             0x0D => Op::SUB,
             0x0E => Op::MUL,
             0x0F => Op::DIV,
+            0x10 => Op::CALL,
+            0x11 => Op::CALL_NAT,
+            0x12 => Op::RET,
             _ => unreachable!(),
         }
     }
@@ -85,7 +112,11 @@ impl VM {
             ip: 0,
             sp: 0,
             ac: 0,
+            bp: 0,
             program: Vec::new(),
+
+            function_table: Vec::new(),
+            call_stack: Vec::new(),
             strings: HashSet::new(),
             stack: Vec::new(),
         }
@@ -106,6 +137,9 @@ impl VM {
             0x0D => 0, // sub
             0x0E => 0, // mul
             0x0F => 0, // div
+            0x10 => 1, // call <address>
+            0x11 => 1, // callnat <native>
+            0x12 => 0, // ret
             0xFF => 0, // halt
             _ => 0,
         }
@@ -118,7 +152,7 @@ impl VM {
         let mut operands = Vec::new();
 
         for i in 1..=operand_count {
-            operands.push(self.program[self.ip as usize + i] as u16);
+            operands.push(self.program[self.ip as usize + i] as u32);
         }
 
         VMOp {
@@ -127,8 +161,45 @@ impl VM {
         }
     }
 
+    fn call_function(&mut self, func: u32) {
+        // Call a function by pushing a new call frame
+        let frame = CallFrame {
+            function_id: func,
+            return_address: self.ip + 2,
+            base_ptr: self.bp,
+        };
+
+        self.call_stack.push(frame);
+        self.bp = self.stack.len() as u32;
+        self.ip = self.function_table[func as usize].address;
+    }
+
+    fn return_from_function(&mut self) {
+        // Return from a function by popping the call frame
+        if let Some(frame) = self.call_stack.pop() {
+            // Restore stack to pre-call state
+            self.ip = frame.return_address;
+
+            let func = &self.function_table[frame.function_id as usize];
+            let return_value = self.stack.pop();
+
+            // Clean up local variables defined in func
+            for _ in 0..func.local_count {
+                self.stack.pop();
+            }
+
+            self.stack.truncate(frame.base_ptr as usize);
+
+            if let Some(rv) = return_value {
+                self.stack.push(rv);
+            }
+
+            self.bp = frame.base_ptr;
+        }
+    }
+
     fn execute(&mut self, mach_op: VMOp) {
-        self.dump_ctx();
+        // self.dump_ctx();
 
         match mach_op.opcode {
             Op::NOP => {} // nop
@@ -223,6 +294,18 @@ impl VM {
                     }
                 }
             }
+
+            // Call function
+            Op::CALL => {
+                let func = mach_op.operands[0];
+                self.call_function(func);
+            }
+
+            Op::RET => {
+                self.return_from_function();
+            }
+
+            _ => todo!("Unimplemented opcode: {:?}", mach_op.opcode),
         }
 
         self.dump_ctx();
@@ -230,10 +313,14 @@ impl VM {
 
     pub fn dump_ctx(&self) {
         println!("--------------------------");
-        println!("ip: {:04X}", self.ip);
-        println!("ac: {:04X}", self.ac);
+        println!("ip: {:08X}", self.ip);
+        println!("sp: {:08X}", self.sp);
+        println!("ac: {:08X}", self.ac);
+        println!("bp: {:08X}", self.bp);
         println!("--------------------------");
         disasm::dump_memory(self, 0, 64);
+
+        disasm::dump_stack(self);
     }
 
     pub fn cycle(&mut self) {
@@ -244,10 +331,18 @@ impl VM {
         let mach_op = self.fetch_decode();
 
         self.execute(mach_op);
-        self.step(operand_count as u16);
+
+        match opcode {
+            0x08 | 0x09 | 0x0A | 0x0B | 0x10 | 0x12 => {
+                // These opcodes modify ip directly, so we don't step here
+            }
+            _ => {
+                self.step(operand_count as u32);
+            }
+        }
     }
 
-    pub fn step(&mut self, size: u16) {
+    pub fn step(&mut self, size: u32) {
         self.ip += 1 + size;
     }
 
