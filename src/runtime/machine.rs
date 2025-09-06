@@ -27,8 +27,9 @@ pub enum Op {
     // Memory
     PUSH_I = 0x01,
     PUSH_SZ = 0x02,
-    POP_I = 0x03,
-    POP_SZ = 0x04,
+    PUSHAC = 0x03,
+    POP_I = 0x04,
+    POP_SZ = 0x05,
 
     // Jumping
     JMP_ABS = 0x08,
@@ -100,8 +101,10 @@ impl From<u8> for Op {
             0x00 => Op::NOP,
             0x01 => Op::PUSH_I,
             0x02 => Op::PUSH_SZ,
-            0x03 => Op::POP_I,
-            0x04 => Op::POP_SZ,
+            0x03 => Op::PUSHAC,
+            0x04 => Op::POP_I,
+            0x05 => Op::POP_SZ,
+            // Jumping
             0x08 => Op::JMP_ABS,
             0x09 => Op::JMP_REL,
             0x0A => Op::JMP_EQ,
@@ -140,8 +143,9 @@ impl VM {
             0x00 => 0, // nop
             0x01 => 1, // pushi <value>
             0x02 => 0, // pushsz <value>, handled specially
-            0x03 => 0, // popi
-            0x04 => 0, // popsz
+            0x03 => 0, // pushac
+            0x04 => 0, // popi
+            0x05 => 0, // popsz
             0x08 => 0, // jmp <address>
             0x09 => 1, // jmp <offset>
             0x0A => 1, // jeq <address>
@@ -274,6 +278,10 @@ impl VM {
                 let string_bytes: Vec<u8> = mach_op.operands.iter().map(|&x| x as u8).collect();
                 self.stack.push(VMValue::String(string_bytes));
             }
+            Op::PUSHAC => {
+                // pushac - push ac onto stack
+                self.stack.push(VMValue::Int(self.ac));
+            }
             Op::POP_I => {
                 // popi - pop immediate value from stack, store in ac
                 if let Some(value) = self.stack.pop() {
@@ -325,7 +333,10 @@ impl VM {
                 // add - pop two values from stack, add, push result
                 if let (Some(v1), Some(v2)) = (self.stack.pop(), self.stack.pop()) {
                     if let (VMValue::Int(i1), VMValue::Int(i2)) = (v1, v2) {
-                        self.stack.push(VMValue::Int(i1.wrapping_add(i2)));
+                        let result = i1.wrapping_add(i2);
+
+                        self.ac = result;
+                        self.stack.push(VMValue::Int(result));
                     }
                 }
             }
@@ -333,7 +344,10 @@ impl VM {
                 // sub - pop two values from stack, subtract, push result
                 if let (Some(v1), Some(v2)) = (self.stack.pop(), self.stack.pop()) {
                     if let (VMValue::Int(i1), VMValue::Int(i2)) = (v1, v2) {
-                        self.stack.push(VMValue::Int(i1.wrapping_sub(i2)));
+                        let result = i1.wrapping_sub(i2);
+
+                        self.ac = result;
+                        self.stack.push(VMValue::Int(result));
                     }
                 }
             }
@@ -341,7 +355,10 @@ impl VM {
                 // mul - pop two values from stack, multiply, push result
                 if let (Some(v1), Some(v2)) = (self.stack.pop(), self.stack.pop()) {
                     if let (VMValue::Int(i1), VMValue::Int(i2)) = (v1, v2) {
-                        self.stack.push(VMValue::Int(i1.wrapping_mul(i2)));
+                        let result = i1.wrapping_mul(i2);
+
+                        self.ac = result;
+                        self.stack.push(VMValue::Int(result));
                     }
                 }
             }
@@ -349,7 +366,10 @@ impl VM {
                 // div - pop two values from stack, divide, push result
                 if let (Some(v1), Some(v2)) = (self.stack.pop(), self.stack.pop()) {
                     if let (VMValue::Int(i1), VMValue::Int(i2)) = (v1, v2) {
-                        self.stack.push(VMValue::Int(i1.wrapping_div(i2)));
+                        let result = i1.wrapping_div(i2);
+
+                        self.ac = result;
+                        self.stack.push(VMValue::Int(result));
                     }
                 }
             }

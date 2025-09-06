@@ -13,16 +13,22 @@ class Op(Enum):
     NOP = 0x00
     PUSHI = 0x01
     PUSHSZ = 0x02
-    POPI = 0x03
-    POPSZ = 0x04
+    PUSHAC = 0x03
+    POPI = 0x04
+    POPSZ = 0x05
+    
+    # Jumping
     JMP_ABS = 0x08
     JMP_REL = 0x09
     JMP_EQ = 0x0A
     JMP_NE = 0x0B
+    
+    # Math
     ADD = 0x0C
     SUB = 0x0D
     MUL = 0x0E
     DIV = 0x0F
+    
     CALL = 0x10
     CALLNAT = 0x11
     RET = 0x12
