@@ -252,6 +252,13 @@ impl<'l> Lexer<'l> {
                     self.advance();
                 }
 
+                '/' if self.peek_ahead(1) == '/' => {
+                    // Skip line comment
+                    while self.peek() != '\n' && self.peek() != '\0' {
+                        self.advance();
+                    }
+                }
+
                 '0'..='9' => {
                     let digit = self.advance();
                     tokens.push(self.lex_number(digit));

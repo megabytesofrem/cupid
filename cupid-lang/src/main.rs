@@ -4,7 +4,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use cupid::runtime::machine::VM;
+    use cupid_lang::runtime::machine::VM;
 
     #[test]
     fn test_machine_initialization() {
@@ -17,7 +17,7 @@ mod tests {
         let mut mach = VM::new();
 
         // Compiled from assembler.py
-        let bytes = include_bytes!("../files/test.bc");
+        let bytes = include_bytes!("../../files/test.bc");
 
         let code = bytes
             .iter()
@@ -29,3 +29,4 @@ mod tests {
         mach.dump_ctx();
     }
 }
+

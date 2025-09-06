@@ -6,12 +6,10 @@
 #[macro_export]
 macro_rules! construct_vm_addr {
     ($address_bytes:expr) => {{
-        // Convert to a u32
         let mut address = 0u32;
-        for &byte in &$address_bytes {
-            address = (address << 8) | (byte as u32);
+        for (i, &byte) in $address_bytes.iter().enumerate() {
+            address |= (byte as u32) << (i * 8); // Little Endian
         }
-
         address
     }};
 }

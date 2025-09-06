@@ -1,6 +1,7 @@
-[package]
-name = "cupid"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["cupid-lang", "cupid-asm"]
 
-[dependencies]
+# [package]
+# name = "cupid"
+# version = "0.1.0"
+# edition = "2024"

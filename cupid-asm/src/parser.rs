@@ -1,9 +1,14 @@
 //! Assembler for Cupids bytecode
 //!
 //! Parser for the Assembly syntax
+//!
+//! The Assembly dialect is pretty simple, and mostly consists of instructions with a few directives.
+//! There are only three data types, integers, byte sequences and NUL-terminated strings. Byte sequences are
+//! denoted between `[0x1 0x2 0x3]`.
 use std::iter::Peekable;
 
-use crate::runtime::assembler::lexer::{self, Token, TokenKind};
+use super::Instr;
+use super::lexer::{self, Token, TokenKind};
 
 #[derive(Debug, Clone)]
 pub struct Parser<'p, I>
@@ -19,9 +24,6 @@ where
 
 // --------------------------------------------
 // AST definition
-
-// Instead of redefining, alias the one from the VM
-pub type Instr = crate::runtime::machine::Op;
 
 #[derive(Debug, Clone)]
 pub enum Directive {
@@ -70,6 +72,49 @@ pub enum ParseError {
         pos: usize,
     },
 }
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseError::UnexpectedToken {
+                expected,
+                found,
+                pos,
+            } => {
+                if let Some(found) = found {
+                    write!(
+                        f,
+                        "Parse error at position {}: expected {}, found {:?}",
+                        pos, expected, found
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Parse error at position {}: expected {}, found end of file",
+                        pos, expected
+                    )
+                }
+            }
+            ParseError::UnexpectedEof => write!(f, "Parse error: unexpected end of file"),
+            ParseError::InvalidArity {
+                expected,
+                found,
+                pos,
+            } => write!(
+                f,
+                "Parse error at position {}: invalid arity, expected {}, found {}",
+                pos, expected, found
+            ),
+            ParseError::InvalidInstruction { name, pos } => write!(
+                f,
+                "Parse error at position {}: invalid instruction '{}'",
+                pos, name
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
@@ -181,10 +226,10 @@ where
     // Assembler Directives
     // --------------------
     // %include "file":                             include file by cut and paste
+    // %define <name> <value>:                      define constant
     // %bytes(0x1 0x2 0x3) or %bytes 0x1 0x2 0x3:   define byte array
     // %string "hello":                             define string
     // %ip:                                         replace data with ip
-    // %define <name> <value>:                      define constant
     // %rep(n) ... %endrep:                         repeat block n times
     // --------------------------------------
 
@@ -388,6 +433,8 @@ where
         let token = self.tokens.next().ok_or(ParseError::UnexpectedEof)?;
         match token.kind {
             TokenKind::Directive(ref name) => {
+                println!("parser: Parsing directive {}", name);
+
                 let has_parens =
                     matches!(self.tokens.peek(), Some(t) if t.kind == TokenKind::LParen);
 
@@ -396,6 +443,7 @@ where
                 }
 
                 let args = self.parse_args()?;
+                println!("parser: Parsed directive arguments {:?}", args);
 
                 if has_parens {
                     self.expect(TokenKind::RParen)?; // expect ')'
@@ -465,7 +513,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::assembler::lexer::Lexer;
+    use super::lexer::Lexer;
 
     use super::*;
 
