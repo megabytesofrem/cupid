@@ -68,7 +68,7 @@ pub fn disasm_instruction(vm: &VM, addr: usize) -> (String, usize) {
 }
 
 fn read_variable_length(start_addr: usize, bytes: &[u8]) -> usize {
-    let mut i = start_addr;
+    let mut i = 0;
     while start_addr + i < bytes.len() && bytes[start_addr + i] != 0 {
         i += 1;
     }

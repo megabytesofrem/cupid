@@ -1,3 +1,9 @@
 // comment
-//jmp 0xcafebabe
-jmp 0x0000dada
+stage1:
+ pushi 4
+ pushi 2
+ add
+ jmp exit
+
+jmp stage1
+exit:

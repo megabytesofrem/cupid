@@ -82,13 +82,13 @@ class Assembler:
         if op_name.lower() == 'jmp':
             # jmp to label, otherwise <address>
             if operand in self.labels:
-                translated_operand = self.labels[operand]
+                address = self.labels[operand]
             elif operand and any(c.isdigit() for c in operand):
                 address = int(operand, 16)
             else:
                 raise ValueError(f'Invalid operand: {operand}')
             
-        
+
             # Generate bytes without leading zeros
             if address == 0:
                 return (op.value, 0)  # Just the null terminator for address 0
@@ -133,7 +133,13 @@ class Assembler:
             if line.endswith(':'):
                 self.labels[line[:-1]] = address
             else:
-                address += 2 if re.match(r'\w+\s+.+', line) else 1  # crude: 2 bytes for op+operand, 1 for op only
+                if re.match(r'\w+\s+.+', line):
+                    if line.strip().startswith('j'):
+                        address += 4 # opcode + address
+                    else:
+                        address += 2 # opcode + operand
+                else:
+                    address += 1 # opcode only
 
         # Second pass, assemble instructions
         for line in lines:

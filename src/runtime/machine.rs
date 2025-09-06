@@ -295,11 +295,7 @@ impl VM {
             // Jumping
             Op::JMP_ABS => {
                 // jmp $<address> - absolute jump
-                let address_bytes: Vec<u8> = mach_op.operands[0].to_be_bytes().to_vec();
-
-                // Convert to a u32
-                let address = construct_vm_addr!(address_bytes);
-
+                let address = mach_op.operands[0];
                 self.ip = address;
             }
             Op::JMP_REL => {
@@ -309,8 +305,7 @@ impl VM {
             }
             Op::JMP_EQ => {
                 // jeq <address> - jump if ac == 0
-                let address_bytes: Vec<u8> = mach_op.operands[0].to_be_bytes().to_vec();
-                let address = construct_vm_addr!(address_bytes);
+                let address = mach_op.operands[0];
 
                 if self.ac == 0 {
                     self.ip = address;
@@ -318,8 +313,7 @@ impl VM {
             }
             Op::JMP_NE => {
                 // jne <address> - jump if ac != 0
-                let address_bytes: Vec<u8> = mach_op.operands[0].to_be_bytes().to_vec();
-                let address = construct_vm_addr!(address_bytes);
+                let address = mach_op.operands[0];
 
                 if self.ac != 0 {
                     self.ip = address;
@@ -398,7 +392,7 @@ impl VM {
         self.execute(mach_op);
 
         match opcode {
-            0x02 | 0x08 => {
+            0x02 => {
                 // Step past the entire instruction including null terminator
                 let mut i = 1;
                 while (self.ip as usize + i) < self.program.len()
@@ -409,7 +403,7 @@ impl VM {
                 self.ip += i as u32 + 1; // +1 for null terminator
             }
 
-            0x09 | 0x0A | 0x0B | 0x10 | 0x12 => {
+            0x08 | 0x09 | 0x0A | 0x0B | 0x10 | 0x12 => {
                 // These opcodes modify ip directly, so we don't step here
             }
             _ => {
@@ -423,13 +417,25 @@ impl VM {
     }
 
     pub fn run(&mut self) {
-        while (self.ip as usize) < self.program.len() {
+        loop {
+            if self.ip as usize >= self.program.len() {
+                break;
+            }
+
             let opcode = self.program[self.ip as usize];
             if opcode == 0xFF {
                 // halt instruction
                 break;
             }
+
             self.cycle();
+            self.dump_ctx();
+
+            // Safety break to prevent infinite loops
+            if self.ip > 1000 {
+                println!("ERROR: ip exceeded 1000");
+                break;
+            }
         }
     }
 
