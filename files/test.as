@@ -1,9 +1,14 @@
 // comment
-stage1:
- pushi 4
- pushi 2
- add
- jmp exit
+part1:
+  pushi 01
 
-jmp stage1
-exit:
+%data
+  msg: %string "hello"
+  len: %bytes 0x05
+%enddata
+
+pushsz $msg
+pushi $len
+
+%include "test2.as"
+%include "test2.as"

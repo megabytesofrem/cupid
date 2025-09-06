@@ -5,6 +5,7 @@ Only supports instructions and labels
 NOTE: This will be rewritten in Rust at a later date.
 '''
 from enum import Enum
+import os
 import re
 import sys
 
@@ -34,8 +35,16 @@ class OperandType(Enum):
     STRING_OR_BYTES = 2
 
 class Assembler:
-    def __init__(self):
+    def __init__(self, root_dir):
+        self.root_dir = root_dir
+        self.in_rep = False
+        self.rep_count = 0 # reset after each rep
+        self.rep_buffer = []
         self.labels = {}
+
+        # TODO: Add data variable section
+        self.in_data_section = False
+        self.data = {}
         self.output = []
 
     def parse_line(self, line):
@@ -43,10 +52,41 @@ class Assembler:
 
         if line.startswith('//') or not line:
             return  # Ignore comments
-        
+
+        if self.in_rep and not line.startswith('%endrep'):
+            self.rep_buffer.append(line)
+            return
+
+        if line.startswith('%'):
+            self.parse_directive(line)
+            return
+
         if line.endswith(':'):
             # We handled this in the first pass, ignore
             return 
+
+        if self.in_data_section and not line.startswith('%enddata'):
+            if ':' in line:
+                label_name = line.split(':')[0].strip()
+                label_content = line.split(':')[1].strip()
+                
+                if label_content.startswith('%string'):
+                    m = re.match(r'%string\s+"([^"]+)"', label_content)
+                    if m:
+                        string_value = m.group(1).encode() + b'\x00'
+                        self.data[label_name] = list(string_value)
+                elif label_content.startswith('%bytes'):
+                    m = re.match(r'%bytes\s+(.+)', label_content)
+                    if m:
+                        byte_values = [int(x, 16) for x in m.group(1).split(' ')]
+                        self.data[label_name] = byte_values
+                else:
+                    try:
+                        byte_values = [int(x, 16) for x in label_content.split(' ')]
+                        self.data[label_name] = byte_values
+                    except ValueError:
+                        pass  # Not hex bytes, ignore
+            return
 
         self.output.append(self.parse_instruction(line))
 
@@ -60,6 +100,57 @@ class Assembler:
             case 'mul': return 'MUL'
             case 'div': return 'DIV'
             case _    : return op_name.upper()
+
+    def define_data_label(self, label, value):
+        if label in self.data:
+            raise ValueError(f'Duplicate data label: {label}')
+
+        self.data[label] = value
+
+    def parse_directive(self, line):
+        import os.path
+
+        match = re.match(r'%(\w+)(?:\s+(.+))?', line)
+        if not match:
+            raise ValueError(f'Invalid directive: {line}')
+
+        directive = match.group(1).lower()
+        operand = match.group(2)
+
+        match directive:
+            case 'include':
+                # Handle include directives
+                file_path = operand.strip('"')
+                include_path = os.path.join(self.root_dir, file_path)
+                print(f"Path: {file_path}, relative: {include_path}")
+
+                print(f"DEBUG: Directive 'include {file_path}'")
+                with open(include_path, 'r') as f:
+                    included_code = f.read()
+                    for inc_line in included_code.splitlines():
+                        self.parse_line(inc_line)
+            case 'rep':
+                self.in_rep = True
+                self.rep_count = int(operand)
+            case 'endrep':
+                self.in_rep = False
+                for _ in range(self.rep_count):
+                    for rep_line in self.rep_buffer:
+                        self.parse_line(rep_line)
+
+                self.rep_buffer = []
+                self.rep_count = 0
+            case 'data':
+                self.in_data_section = True
+            case 'enddata':
+                self.in_data_section = False
+            case 'bytes':
+                byte_values = [int(x, 16) for x in operand.split(' ')]
+                print(f"DEBUG: Directive 'bytes {' '.join(f'{b:02X}' for b in byte_values)}'")
+                self.output.append(tuple(byte_values))
+            case 'string':
+                byte_values = operand.strip('"').encode()  # null-terminated
+                self.output.append((byte_values, 0))
 
     def parse_instruction(self, line):
         # Parse 'mul', 'jmp <addr>'
@@ -110,7 +201,16 @@ class Assembler:
                     string_bytes = string_literal.encode() + b'\x00'  # null-terminated
                     return (op.value, *string_bytes, 0)
                 else:
-                    translated_operand = operand.encode() + b'\x00'  # null-terminated
+                    if operand.startswith("$"):
+                        label = operand[1:]
+                        # Return the data
+                        print(f'DATA: {label} {self.data}')
+                        if label in self.data:
+                            return (op.value, *self.data[label])
+                        else:
+                            raise ValueError(f'Undefined label: {label}')
+                    else:
+                        translated_operand = operand.encode() + b'\x00'  # null-terminated
 
         print(f'{normalized_op_name} → {op.value:02X} {translated_operand if translated_operand is not None else ''}')
         if operand is not None:
@@ -120,28 +220,56 @@ class Assembler:
     def assemble(self, code):
         self.labels = {}
         self.output = []
+        self.data = {}  # Reset data
 
         # First pass: collect labels
         lines = code.splitlines()
 
         address = 0x0
+        in_data_section = False
+        
         for line in lines:
             line = line.strip()
             if line.startswith('//') or not line:
                 continue
+        
+            if line.startswith('%'):
+                match = re.match(r'%(\w+)(?:\s+(.+))?', line)  # Make operand optional
+                if match:
+                    directive = match.group(1).lower()
+                    if directive == 'data':
+                        in_data_section = True
+                    elif directive == 'enddata':
+                        in_data_section = False
+                    elif directive == 'bytes' and match.group(2):
+                        byte_count = len(match.group(2).split(' '))
+                        address += byte_count
+                continue
 
             if line.endswith(':'):
-                self.labels[line[:-1]] = address
+                label_name = line[:-1]
+                self.labels[label_name] = address
+                print(f"Label '{label_name}' at address 0x{address:04X}")
+            elif in_data_section and ':' in line:
+                # Handle data labels like "msg: %string 'hello'" - DON'T count towards address
+                label_name = line.split(':')[0].strip()
+                self.labels[label_name] = address
+                print(f"Data label '{label_name}' at address 0x{address:04X}")
             else:
-                if re.match(r'\w+\s+.+', line):
-                    if line.strip().startswith('j'):
-                        address += 4 # opcode + address
+                # Only count instruction sizes if NOT in data section
+                if not in_data_section:
+                    if re.match(r'\w+\s+.+', line):
+                        if line.strip().startswith('j'):
+                            address += 4 # opcode + address
+                        else:
+                            address += 2 # opcode + operand
                     else:
-                        address += 2 # opcode + operand
-                else:
-                    address += 1 # opcode only
+                        address += 1 # opcode only
 
-        # Second pass, assemble instructions
+        print(f"Final labels: {self.labels}")
+        print(f"Final data: {self.data}")
+
+        # Second pass: assemble instructions
         for line in lines:
             self.parse_line(line)
 
@@ -179,7 +307,9 @@ if __name__ == '__main__':
     code = asm_file.read()
     asm_file.close()
 
-    assembler = Assembler()
+    root_dir = os.path.dirname(os.path.abspath(sys.argv[1]))
+
+    assembler = Assembler(root_dir)
     bytecode = assembler.assemble(code)
 
     print('Output: ')
@@ -195,26 +325,30 @@ if __name__ == '__main__':
 
 '''
 
-VM output:
-ip: 00FF
-sp: 0000
-ac: 0006
-bp: 0000
---------------------------
-0000: 01 04 : pushi 4    01 02 : pushi 2    0C : add    03 : $03    08 08 : jmp $0008    
-0008: 08 FF : jmp $00FF    
+Directives
+-------------
+%include filename - cut and paste the file contents
+%bytes 0x01 0x02 0x03 - cut and paste byte values
+%string "hello" - cut and paste a string, nul-terminated
+%rep count <lines> %endrep - repeat the enclosed lines 'count' times
 
+Data section
+------------
+This was a *nightmare* to get working, genuinely almost cried.
 
-Bytecode:
+Conventions
+-------------
+1. Use labels as a form of variable and %string to splat bytes, $ will extract their bytes
+msg:
+  %string "hello"
+pushsz $msg
 
-01 04 01 02 0C 03 08 08 08 FF
+2. Use %rep to avoid rewriting the same sequence of instructions.
 
---
-pushi 4 // 01 04
-pushi 2 // 01 02
-add     // 0C
-popi    // 03
-jmp $08 // 08 08
-jmp $FF // 08 FF
+3. Use %data to define variables, there can only be ONE data section.
+%data
+  msg: %string "hello"
+  len: %bytes 0x05
+%enddata
 
 '''
