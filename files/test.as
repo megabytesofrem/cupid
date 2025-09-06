@@ -1,7 +1,16 @@
 // comment
 start:
 
+%data
+  msg: %string "hello"
+%enddata
+
 // push 1 and 2
-pushi 1
-pushi 2
-add
+pushsz $msg
+
+%rep 255
+  pushi 1
+%endrep
+// pushi $len
+
+// %include "test2.as"
