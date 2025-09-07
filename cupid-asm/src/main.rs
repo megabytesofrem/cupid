@@ -1,11 +1,11 @@
-use clap::Parser as CParser;
+use clap::Parser as Clap;
 use cupid_asm::assembler::Assembler;
 use cupid_asm::lexer::Lexer;
 use cupid_asm::parser::Parser;
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(CParser)]
+#[derive(Clap)]
 #[command(name = "cas")]
 #[command(about = "Cupid bytecode assembler")]
 struct Args {
@@ -20,10 +20,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Read input file
     let input = fs::read_to_string(&args.input)?;
-    let output = args
-        .output
-        .clone()
-        .unwrap_or_else(|| args.input.with_extension("cupid"));
 
     // Assemble
     let mut lexer = Lexer::new(&input);

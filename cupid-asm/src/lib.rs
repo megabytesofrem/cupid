@@ -16,6 +16,7 @@ pub enum Instr {
     POP_SZ = 0x05,
 
     // Jumping
+    CMP = 0x07,
     JMP_ABS = 0x08,
     JMP_REL = 0x09,
     JEQ = 0x0A,

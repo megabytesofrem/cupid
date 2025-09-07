@@ -54,6 +54,7 @@ impl Assembler {
             0x03 => 0, // pushac
             0x04 => 0, // popi
             0x05 => 0, // popsz
+            0x07 => 0, // cmp
             0x08 => 1, // jmp <address>, always 4 bytes
             0x09 => 1, // jmp <offset>
             0x0A => 1, // jeq <address>

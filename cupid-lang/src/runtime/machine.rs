@@ -14,6 +14,43 @@ macro_rules! construct_vm_addr {
     }};
 }
 
+macro_rules! decode {
+    ($self:expr, $ip:expr, no_ops) => {
+        (vec![], $ip + 1)
+    };
+
+    ($self:expr, $ip:expr, byte) => {{
+        let val = $self.program[($ip as usize) + 1] as u32;
+        (vec![val], $ip + 2)
+    }};
+
+    ($self:expr, $ip:expr, until_null) => {{
+        let mut operands = vec![];
+        let mut i = 1;
+        while $self.program[($ip as usize) + i] != 0 {
+            operands.push($self.program[($ip as usize) + i] as u32);
+            i += 1;
+        }
+        (operands, $ip + i as u32 + 1)
+    }};
+
+    ($self:expr, $ip:expr, reg_byte) => {{
+        let reg = $self.program[$ip + 1] as u32;
+        let val = $self.program[$ip + 2] as u32;
+        (vec![reg, val], $ip + 3)
+    }};
+
+    ($self:expr, $ip:expr, addr) => {{
+        let bytes = [
+            $self.program[($ip as usize) + 1],
+            $self.program[($ip as usize) + 2],
+            $self.program[($ip as usize) + 3],
+            $self.program[($ip as usize) + 4],
+        ];
+        (vec![construct_vm_addr!(bytes)], $ip + 5)
+    }};
+}
+
 use crate::runtime::disasm;
 use std::collections::HashSet;
 
@@ -30,6 +67,7 @@ pub enum Op {
     POP_SZ = 0x05,
 
     // Jumping
+    CMP = 0x07,
     JMP_ABS = 0x08,
     JMP_REL = 0x09,
     JEQ = 0x0A,
@@ -80,6 +118,7 @@ pub struct CallFrame {
 
 #[derive(Debug, Clone)]
 pub struct VM {
+    next_ip: u32,
     pub ip: u32, // instruction pointer
     pub sp: u32, // stack pointer
     pub ac: u32, // accumulator
@@ -90,6 +129,8 @@ pub struct VM {
     pub call_stack: Vec<CallFrame>,
 
     pub strings: HashSet<(u32, Vec<u8>)>,
+    pub heap: Vec<Option<VMValue>>,
+    pub free_list: Vec<u32>,
     pub stack: Vec<VMValue>,
 }
 
@@ -105,6 +146,7 @@ impl TryFrom<u8> for Op {
             0x04 => Ok(Op::POP_I),
             0x05 => Ok(Op::POP_SZ),
             // Jumping
+            0x07 => Ok(Op::CMP),
             0x08 => Ok(Op::JMP_ABS),
             0x09 => Ok(Op::JMP_REL),
             0x0A => Ok(Op::JEQ),
@@ -125,6 +167,7 @@ impl TryFrom<u8> for Op {
 impl VM {
     pub fn new() -> Self {
         Self {
+            next_ip: 0,
             ip: 0,
             sp: 0,
             ac: 0,
@@ -134,96 +177,27 @@ impl VM {
             function_table: Vec::new(),
             call_stack: Vec::new(),
             strings: HashSet::new(),
-            stack: Vec::new(),
-        }
-    }
 
-    fn operand_count(&self, opcode: u8) -> usize {
-        match opcode {
-            0x00 => 0, // nop
-            0x01 => 1, // pushi <value>
-            0x02 => 0, // pushsz <value>, handled specially
-            0x03 => 0, // pushac
-            0x04 => 0, // popi
-            0x05 => 0, // popsz
-            0x08 => 0, // jmp <address>
-            0x09 => 1, // jmp <offset>
-            0x0A => 1, // jeq <address>
-            0x0B => 1, // jne <address>
-            0x0C => 0, // add
-            0x0D => 0, // sub
-            0x0E => 0, // mul
-            0x0F => 0, // div
-            0x10 => 1, // call <address>
-            0x11 => 0, // callnat <name>, handled specially
-            0x12 => 0, // ret
-            0xFF => 0, // halt
-            _ => 0,
+            heap: Vec::new(),
+            free_list: Vec::new(),
+            stack: Vec::new(),
         }
     }
 
     fn fetch_decode(&mut self) -> VMOp {
         // Determine the number of operands and read that many
         let opcode = self.program[self.ip as usize];
-        let mut operands = Vec::new();
-
         println!("fetch_decode: called for {:02X}", opcode);
-
-        let op = match Op::try_from(opcode) {
-            Ok(op) => op,
-            Err(_) => {
-                println!(
-                    "ERROR: Unknown opcode {:02X} at address {:02X}",
-                    opcode, self.ip
-                );
-                println!(
-                    "Context: {:?}",
-                    &self.program[self.ip as usize..self.ip as usize + 8]
-                );
-                unreachable!()
-            }
+        let (operands, next_ip) = match opcode {
+            0x0 | 0x0C..=0x0F | 0xFF => decode!(self, self.ip, no_ops), // nop, add, sub, mul, div, halt
+            0x01 => decode!(self, self.ip, byte),                       // pushi
+            0x02 => decode!(self, self.ip, until_null),                 // pushsz
+            0x07 => decode!(self, self.ip, no_ops),                     // cmp
+            0x08 | 0x0A | 0x0B | 0x10 => decode!(self, self.ip, addr),  // jmp, jeq, jne, call
+            _ => panic!("Unimplemented opcode in fetch_decode: {:02X}", opcode),
         };
 
-        match op {
-            Op::PUSHSZ => {
-                // pushsz <value>: read until null byte
-                let mut i = 1;
-                while (self.ip as usize + i) < self.program.len()
-                    && self.program[self.ip as usize + i] != 0
-                {
-                    let next = self.program[self.ip as usize + i] as u32;
-                    operands.push(next);
-                    i += 1;
-                }
-            }
-
-            Op::JMP_ABS | Op::CALL | Op::JEQ | Op::JNE => {
-                println!("fetch_decode: reading operands for {:?}", opcode);
-
-                // Always read 4 bytes, since we are little-endian
-                let addr_bytes = [
-                    self.program[self.ip as usize + 1],
-                    self.program[self.ip as usize + 2],
-                    self.program[self.ip as usize + 3],
-                    self.program[self.ip as usize + 4],
-                ];
-
-                // Construct an address from the byte array
-                let address = construct_vm_addr!(addr_bytes);
-
-                println!("jmp_abs: jumping to address {:08X}", address);
-
-                // Replace operands with single address value
-                operands.clear();
-                operands.push(address);
-            }
-            _ => {
-                let operand_count = self.operand_count(opcode);
-                for i in 1..=operand_count {
-                    operands.push(self.program[self.ip as usize + i] as u32);
-                }
-            }
-        }
+        self.next_ip = next_ip;
 
         VMOp {
             opcode: opcode.try_into().unwrap(),
@@ -241,7 +215,7 @@ impl VM {
 
         self.call_stack.push(frame);
         self.bp = self.stack.len() as u32;
-        self.ip = self.function_table[func as usize].address;
+        self.ip = func;
     }
 
     fn return_from_function(&mut self) {
@@ -310,6 +284,22 @@ impl VM {
             }
 
             // Jumping
+            Op::CMP => {
+                // cmp - compare top two values on stack
+                if let (Some(v1), Some(v2)) = (self.stack.pop(), self.stack.pop()) {
+                    if let (VMValue::Int(i1), VMValue::Int(i2)) = (v1, v2) {
+                        let result = if i1 < i2 {
+                            0
+                        } else if i1 == i2 {
+                            1
+                        } else {
+                            2
+                        };
+                        self.stack.push(VMValue::Int(result));
+                    }
+                }
+            }
+
             Op::JMP_ABS => {
                 // jmp $<address> - absolute jump
                 let address = mach_op.operands[0];
@@ -324,16 +314,20 @@ impl VM {
                 // jeq <address> - jump if ac == 0
                 let address = mach_op.operands[0];
 
-                if self.ac == 0 {
-                    self.ip = address;
+                if let Some(top) = self.stack.pop() {
+                    if top == VMValue::Int(1) {
+                        self.ip = address;
+                    }
                 }
             }
             Op::JNE => {
                 // jne <address> - jump if ac != 0
                 let address = mach_op.operands[0];
 
-                if self.ac != 0 {
-                    self.ip = address;
+                if let Some(top) = self.stack.pop() {
+                    if top != VMValue::Int(1) {
+                        self.ip = address;
+                    }
                 }
             }
 
@@ -401,10 +395,10 @@ impl VM {
 
     pub fn dump_ctx(&self) {
         println!("--------------------------");
-        println!("ip: {:08X}", self.ip);
-        println!("sp: {:08X}", self.sp);
-        println!("ac: {:08X}", self.ac);
-        println!("bp: {:08X}", self.bp);
+        println!(
+            "ip: {:08X}\tsp: {:08X}\tac: {:08X}\tbp: {:08X}",
+            self.ip, self.sp, self.ac, self.bp
+        );
         println!("--------------------------");
         disasm::dump_memory(self, 0, 64);
 
@@ -413,9 +407,6 @@ impl VM {
 
     pub fn cycle(&mut self) {
         let opcode = self.program[self.ip as usize];
-
-        // Step by the operand count
-        let operand_count = self.operand_count(opcode);
         let mach_op = self.fetch_decode();
 
         self.execute(mach_op);
@@ -435,8 +426,9 @@ impl VM {
             0x08 | 0x09 | 0x0A | 0x0B | 0x10 | 0x12 => {
                 // These opcodes modify ip directly, so we don't step here
             }
+
             _ => {
-                self.step(operand_count as u32);
+                self.ip = self.next_ip;
             }
         }
     }

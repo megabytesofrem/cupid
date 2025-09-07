@@ -50,11 +50,8 @@ impl<'l> Lexer<'l> {
             #[rustfmt::skip]
             reserved_words: vec![
                 "nop", "pushi", "pushsz", "pushac", "popi", "popsz",
-                "j", "jne", "jeq", "add", "sub", "mul", "div", "mod",
+                "cmp", "j", "jne", "jeq", "add", "sub", "mul", "div", "mod",
                 "call", "callnat", "ret", "halt",
-
-                // Assembly pseudo-instructions
-                "pushbz",
             ],
         }
     }

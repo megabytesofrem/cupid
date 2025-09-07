@@ -201,6 +201,7 @@ where
                     "pushac" => Ok(Node::Instruction(Instr::PUSHAC, args)),
                     "popi" => Ok(Node::Instruction(Instr::POP_I, args)),
                     "popsz" => Ok(Node::Instruction(Instr::POP_SZ, args)),
+                    "cmp" => Ok(Node::Instruction(Instr::CMP, args)),
                     "j" => Ok(Node::Instruction(Instr::JMP_ABS, args)),
                     "jne" => Ok(Node::Instruction(Instr::JNE, args)),
                     "jeq" => Ok(Node::Instruction(Instr::JEQ, args)),
@@ -210,8 +211,6 @@ where
                     "div" => Ok(Node::Instruction(Instr::DIV, args)),
                     "call" => Ok(Node::Instruction(Instr::CALL, args)),
                     "callnat" => Ok(Node::Instruction(Instr::CALL_NAT, args)),
-                    "ret" => Ok(Node::Instruction(Instr::RET, args)),
-                    "halt" => Ok(Node::Instruction(Instr::HALT, args)),
 
                     _ => {
                         println!("parse_instruction: {}", instr);
