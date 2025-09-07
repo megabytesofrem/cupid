@@ -1,5 +1,5 @@
-pushi 1
-pushi 1
+push8 1
+push8 1
 cmp
 
 jne notequal

@@ -1,3 +1,3 @@
 pushsz "hello"
-pushi 5
+push8 5
 callnat print

@@ -1,3 +1,3 @@
-push 2
-push 4
+push8 2
+push8 4
 div

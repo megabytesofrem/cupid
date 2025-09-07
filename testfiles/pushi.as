@@ -1,1 +1,3 @@
-pushi 1
+push8 0x12
+push16 0x1234
+// push32 0x12345678

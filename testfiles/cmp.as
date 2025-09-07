@@ -1,3 +1,3 @@
-push 1
-push 2
+push8 1
+push8 2
 cmp

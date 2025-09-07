@@ -4,7 +4,7 @@
 //! Our VM is a trivial stack machine which executes its bytecode
 
 #[macro_export]
-macro_rules! construct_vm_addr {
+macro_rules! construct_dword {
     ($address_bytes:expr) => {{
         let mut address = 0u32;
         for (i, &byte) in $address_bytes.iter().enumerate() {
@@ -24,6 +24,15 @@ macro_rules! decode {
         (vec![val], $ip + 2)
     }};
 
+    ($self:expr, $ip:expr, word) => {{
+        let bytes = [
+            $self.program[($ip as usize) + 1],
+            $self.program[($ip as usize) + 2],
+        ];
+        let val = (bytes[0] as u32) | ((bytes[1] as u32) << 8);
+        (vec![val], $ip + 3)
+    }};
+
     ($self:expr, $ip:expr, until_null) => {{
         let mut operands = vec![];
         let mut i = 1;
@@ -40,6 +49,16 @@ macro_rules! decode {
         (vec![reg, val], $ip + 3)
     }};
 
+    ($self:expr, $ip:expr, dword) => {{
+        let bytes = [
+            $self.program[($ip as usize) + 1],
+            $self.program[($ip as usize) + 2],
+            $self.program[($ip as usize) + 3],
+            $self.program[($ip as usize) + 4],
+        ];
+        (vec![construct_dword!(bytes)], $ip + 5)
+    }};
+
     ($self:expr, $ip:expr, addr) => {{
         let bytes = [
             $self.program[($ip as usize) + 1],
@@ -47,7 +66,7 @@ macro_rules! decode {
             $self.program[($ip as usize) + 3],
             $self.program[($ip as usize) + 4],
         ];
-        (vec![construct_vm_addr!(bytes)], $ip + 5)
+        (vec![construct_dword!(bytes)], $ip + 5)
     }};
 }
 
@@ -59,30 +78,33 @@ use std::collections::HashSet;
 pub enum Op {
     NOP = 0x00,
 
-    // Memory
-    PUSH_I = 0x01,
-    PUSHSZ = 0x02,
-    PUSHAC = 0x03,
-    POP_I = 0x04,
-    POP_SZ = 0x05,
+    PUSH8 = 0x01,
+    PUSH16 = 0x02,
+    PUSH32 = 0x03,
+    PUSHSZ = 0x04,
+    PUSHAC = 0x05,
+    POP8 = 0x06,
+    POP16 = 0x07,
+    POP32 = 0x08,
+    POPSZ = 0x09,
 
     // Jumping
-    CMP = 0x07,
-    JMP_ABS = 0x08,
-    JMP_REL = 0x09,
-    JEQ = 0x0A,
-    JNE = 0x0B,
+    CMP = 0x0C,
+    JABS = 0x0D,
+    JREL = 0x0E,
+    JEQ = 0x0F,
+    JNE = 0x10,
 
     // Math
-    ADD = 0x0C,
-    SUB = 0x0D,
-    MUL = 0x0E,
-    DIV = 0x0F,
+    ADD = 0x11,
+    SUB = 0x12,
+    MUL = 0x13,
+    DIV = 0x14,
 
-    // Calls
-    CALL = 0x10,
-    CALL_NAT = 0x11,
-    RET = 0x12,
+    // Other
+    CALL = 0x15,
+    CALL_NAT = 0x16,
+    RET = 0x17,
 
     HALT = 0xFF,
 }
@@ -140,25 +162,28 @@ impl TryFrom<u8> for Op {
     fn try_from(byte: u8) -> Result<Self, Self::Error> {
         match byte {
             0x00 => Ok(Op::NOP),
-            0x01 => Ok(Op::PUSH_I),
-            0x02 => Ok(Op::PUSHSZ),
-            0x03 => Ok(Op::PUSHAC),
-            0x04 => Ok(Op::POP_I),
-            0x05 => Ok(Op::POP_SZ),
-            // Jumping
-            0x07 => Ok(Op::CMP),
-            0x08 => Ok(Op::JMP_ABS),
-            0x09 => Ok(Op::JMP_REL),
-            0x0A => Ok(Op::JEQ),
-            0x0B => Ok(Op::JNE),
+            0x01 => Ok(Op::PUSH8),
+            0x02 => Ok(Op::PUSH16),
+            0x03 => Ok(Op::PUSH32),
+            0x04 => Ok(Op::PUSHSZ),
+            0x05 => Ok(Op::PUSHAC),
+            0x06 => Ok(Op::POP8),
+            0x07 => Ok(Op::POP16),
+            0x08 => Ok(Op::POP32),
+            0x09 => Ok(Op::POPSZ),
+            0x0C => Ok(Op::CMP),
+            0x0D => Ok(Op::JABS),
+            0x0E => Ok(Op::JREL),
+            0x0F => Ok(Op::JEQ),
+            0x10 => Ok(Op::JNE),
+            0x11 => Ok(Op::ADD),
+            0x12 => Ok(Op::SUB),
+            0x13 => Ok(Op::MUL),
+            0x14 => Ok(Op::DIV),
+            0x15 => Ok(Op::CALL),
+            0x16 => Ok(Op::CALL_NAT),
+            0x17 => Ok(Op::RET),
             0xFF => Ok(Op::HALT),
-            0x0C => Ok(Op::ADD),
-            0x0D => Ok(Op::SUB),
-            0x0E => Ok(Op::MUL),
-            0x0F => Ok(Op::DIV),
-            0x10 => Ok(Op::CALL),
-            0x11 => Ok(Op::CALL_NAT),
-            0x12 => Ok(Op::RET),
             _ => Err("Unknown opcode"),
         }
     }
@@ -188,12 +213,31 @@ impl VM {
         // Determine the number of operands and read that many
         let opcode = self.program[self.ip as usize];
         println!("fetch_decode: called for {:02X}", opcode);
-        let (operands, next_ip) = match opcode {
-            0x0 | 0x0C..=0x0F | 0xFF => decode!(self, self.ip, no_ops), // nop, add, sub, mul, div, halt
-            0x01 => decode!(self, self.ip, byte),                       // pushi
-            0x02 => decode!(self, self.ip, until_null),                 // pushsz
-            0x07 => decode!(self, self.ip, no_ops),                     // cmp
-            0x08 | 0x0A | 0x0B | 0x10 => decode!(self, self.ip, addr),  // jmp, jeq, jne, call
+        let (operands, next_ip) = match opcode.try_into().unwrap() {
+            Op::NOP | Op::HALT => decode!(self, self.ip, no_ops),
+
+            Op::PUSH8 => decode!(self, self.ip, byte),
+            Op::PUSH16 => decode!(self, self.ip, word),
+            Op::PUSH32 => decode!(self, self.ip, dword),
+            Op::PUSHSZ => decode!(self, self.ip, until_null),
+            Op::PUSHAC => decode!(self, self.ip, no_ops),
+            Op::POP8 => decode!(self, self.ip, no_ops),
+            Op::POP16 => decode!(self, self.ip, no_ops),
+            Op::POP32 => decode!(self, self.ip, no_ops),
+            Op::POPSZ => decode!(self, self.ip, no_ops),
+            Op::CMP => decode!(self, self.ip, no_ops),
+            Op::JABS => decode!(self, self.ip, addr),
+            Op::JREL => decode!(self, self.ip, addr),
+            Op::JEQ => decode!(self, self.ip, addr),
+            Op::JNE => decode!(self, self.ip, addr),
+            Op::ADD => decode!(self, self.ip, no_ops),
+            Op::SUB => decode!(self, self.ip, no_ops),
+            Op::MUL => decode!(self, self.ip, no_ops),
+            Op::DIV => decode!(self, self.ip, no_ops),
+            Op::CALL => decode!(self, self.ip, addr),
+            Op::CALL_NAT => decode!(self, self.ip, addr),
+            Op::RET => decode!(self, self.ip, no_ops),
+
             _ => panic!("Unimplemented opcode in fetch_decode: {:02X}", opcode),
         };
 
@@ -251,11 +295,22 @@ impl VM {
             Op::HALT => {} // halt
 
             // Memory
-            Op::PUSH_I => {
+            Op::PUSH8 => {
                 // pushi <value> - push immediate value onto stack
                 let value = mach_op.operands[0];
                 self.stack.push(VMValue::Int(value));
             }
+            Op::PUSH16 => {
+                // pushi <value> - push immediate value onto stack
+                let value = mach_op.operands[0];
+                self.stack.push(VMValue::Int(value));
+            }
+            Op::PUSH32 => {
+                // pushi <value> - push immediate value onto stack
+                let value = mach_op.operands[0];
+                self.stack.push(VMValue::Int(value));
+            }
+
             Op::PUSHSZ => {
                 // pushsz "<value>" - push string literal onto stack
                 let string_bytes: Vec<u8> = mach_op.operands.iter().map(|&x| x as u8).collect();
@@ -265,16 +320,31 @@ impl VM {
                 // pushac - push ac onto stack
                 self.stack.push(VMValue::Int(self.ac));
             }
-            Op::POP_I => {
-                // popi - pop immediate value from stack, store in ac
+            Op::POP8 => {
+                // popi - pop value from stack into ac
                 if let Some(value) = self.stack.pop() {
-                    self.ac = match value {
-                        VMValue::Int(v) => v,
-                        _ => unreachable!(),
-                    };
+                    if let VMValue::Int(v) = value {
+                        self.ac = v & 0xFF; // Mask to 8 bits
+                    }
                 }
             }
-            Op::POP_SZ => {
+            Op::POP16 => {
+                // popi - pop value from stack into ac
+                if let Some(value) = self.stack.pop() {
+                    if let VMValue::Int(v) = value {
+                        self.ac = v & 0xFFFF; // Mask to 16 bits
+                    }
+                }
+            }
+            Op::POP32 => {
+                // popi - pop value from stack into ac
+                if let Some(value) = self.stack.pop() {
+                    if let VMValue::Int(v) = value {
+                        self.ac = v; // Full 32 bits
+                    }
+                }
+            }
+            Op::POPSZ => {
                 // popsz - pop string literal from stack, store in string table
                 if let Some(value) = self.stack.pop() {
                     if let VMValue::String(v) = value {
@@ -300,12 +370,12 @@ impl VM {
                 }
             }
 
-            Op::JMP_ABS => {
+            Op::JABS => {
                 // jmp $<address> - absolute jump
                 let address = mach_op.operands[0];
                 self.ip = address;
             }
-            Op::JMP_REL => {
+            Op::JREL => {
                 // jmp +<offset> - relative jump
                 let offset = mach_op.operands[0];
                 self.ip = self.ip.wrapping_add(offset);

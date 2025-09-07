@@ -1,5 +1,5 @@
 use crate::{
-    construct_vm_addr,
+    construct_dword,
     runtime::machine::{VM, VMValue},
 };
 
@@ -8,8 +8,27 @@ pub fn disasm_instruction(vm: &VM, addr: usize) -> (String, usize) {
     let opcode = vm.program[addr];
     match opcode {
         0x00 => (format!("nop"), 1),
-        0x01 => (format!("pushi {}", vm.program[addr + 1]), 2),
-        0x02 => {
+        0x01 => (format!("push8 {}", vm.program[addr + 1]), 2),
+        0x02 => (
+            format!(
+                "push16 {}",
+                construct_dword!(vec![vm.program[addr + 1], vm.program[addr + 2]])
+            ),
+            3,
+        ),
+        0x03 => (
+            format!(
+                "push32 {}",
+                construct_dword!(vec![
+                    vm.program[addr + 1],
+                    vm.program[addr + 2],
+                    vm.program[addr + 3],
+                    vm.program[addr + 4]
+                ])
+            ),
+            5,
+        ),
+        0x04 => {
             let len = read_variable_length(addr + 1, &vm.program);
             let string_bytes = &vm.program[addr + 1..addr + len + 1];
             let string = String::from_utf8_lossy(string_bytes);
@@ -18,22 +37,21 @@ pub fn disasm_instruction(vm: &VM, addr: usize) -> (String, usize) {
                 len + 1, // +1 for the null terminator
             )
         }
-        0x03 => (format!("pushac"), 1),
-        0x04 => (format!("popi"), 1),
-        0x05 => (format!("popsz"), 1),
-        0x08 => {
+        0x05 => (format!("pushac"), 1),
+        0x06 => (format!("pop8"), 1),
+        0x07 => (format!("pop16"), 1),
+        0x08 => (format!("pop32"), 1),
+        0x09 => (format!("popsz"), 1),
+        0x0C => (format!("cmp"), 1),
+        0x0D | 0x0E => {
             let len = read_variable_length(addr + 1, &vm.program);
             let address_bytes = &vm.program[addr + 1..addr + len + 1];
             (
-                format!("jmp ${:08X}", format_address(&address_bytes)),
+                format!("j ${:08X}", format_address(&address_bytes)),
                 len + 1,
             )
         }
-        0x09 => (
-            format!("jmp +{:08X}", format_address(&vm.program[addr + 1..])),
-            2,
-        ),
-        0x0A => {
+        0x0F => {
             let len = read_variable_length(addr + 1, &vm.program);
             let address_bytes = &vm.program[addr + 1..addr + len + 1];
             (
@@ -41,7 +59,7 @@ pub fn disasm_instruction(vm: &VM, addr: usize) -> (String, usize) {
                 len + 1,
             )
         }
-        0x0B => {
+        0x10 => {
             let len = read_variable_length(addr + 1, &vm.program);
             let address_bytes = &vm.program[addr + 1..addr + len + 1];
             (
@@ -49,11 +67,11 @@ pub fn disasm_instruction(vm: &VM, addr: usize) -> (String, usize) {
                 len + 1,
             )
         }
-        0x0C => (format!("add"), 1),
-        0x0D => (format!("sub"), 1),
-        0x0E => (format!("mul"), 1),
-        0x0F => (format!("div"), 1),
-        0x10 => {
+        0x11 => (format!("add"), 1),
+        0x12 => (format!("sub"), 1),
+        0x13 => (format!("mul"), 1),
+        0x14 => (format!("div"), 1),
+        0x15 => {
             let len = read_variable_length(addr + 1, &vm.program);
             let address_bytes = &vm.program[addr + 1..addr + len + 1];
             (
@@ -61,8 +79,8 @@ pub fn disasm_instruction(vm: &VM, addr: usize) -> (String, usize) {
                 len + 1,
             )
         }
-        0x11 => (format!("callnat {}", vm.program[addr + 1]), 2),
-        0x12 => (format!("ret"), 1),
+        0x16 => (format!("callnat {}", vm.program[addr + 1]), 2),
+        0x17 => (format!("ret"), 1),
         0xFF => (format!("halt"), 1),
         _ => (format!("${:02X}", opcode), 1),
     }
@@ -79,7 +97,7 @@ fn read_variable_length(start_addr: usize, bytes: &[u8]) -> usize {
 }
 
 fn format_address(bytes: &[u8]) -> u32 {
-    construct_vm_addr!(bytes.to_vec())
+    construct_dword!(bytes.to_vec())
 }
 
 pub fn dump_memory(vm: &VM, start: usize, end: usize) {

@@ -196,21 +196,27 @@ where
 
                 match instr.as_str() {
                     "nop" => Ok(Node::Instruction(Instr::NOP, args)),
-                    "pushi" => Ok(Node::Instruction(Instr::PUSH_I, args)),
+                    "push8" => Ok(Node::Instruction(Instr::PUSH8, args)),
+                    "push16" => Ok(Node::Instruction(Instr::PUSH16, args)),
+                    "push32" => Ok(Node::Instruction(Instr::PUSH32, args)),
                     "pushsz" => Ok(Node::Instruction(Instr::PUSHSZ, args)),
                     "pushac" => Ok(Node::Instruction(Instr::PUSHAC, args)),
-                    "popi" => Ok(Node::Instruction(Instr::POP_I, args)),
-                    "popsz" => Ok(Node::Instruction(Instr::POP_SZ, args)),
+                    "pop8" => Ok(Node::Instruction(Instr::POP8, args)),
+                    "pop16" => Ok(Node::Instruction(Instr::POP16, args)),
+                    "pop32" => Ok(Node::Instruction(Instr::POP32, args)),
+                    "popsz" => Ok(Node::Instruction(Instr::POPSZ, args)),
                     "cmp" => Ok(Node::Instruction(Instr::CMP, args)),
-                    "j" => Ok(Node::Instruction(Instr::JMP_ABS, args)),
-                    "jne" => Ok(Node::Instruction(Instr::JNE, args)),
+                    "j" => Ok(Node::Instruction(Instr::JABS, args)),
                     "jeq" => Ok(Node::Instruction(Instr::JEQ, args)),
+                    "jne" => Ok(Node::Instruction(Instr::JNE, args)),
                     "add" => Ok(Node::Instruction(Instr::ADD, args)),
                     "sub" => Ok(Node::Instruction(Instr::SUB, args)),
                     "mul" => Ok(Node::Instruction(Instr::MUL, args)),
                     "div" => Ok(Node::Instruction(Instr::DIV, args)),
                     "call" => Ok(Node::Instruction(Instr::CALL, args)),
                     "callnat" => Ok(Node::Instruction(Instr::CALL_NAT, args)),
+                    "ret" => Ok(Node::Instruction(Instr::RET, args)),
+                    "halt" => Ok(Node::Instruction(Instr::HALT, args)),
 
                     _ => {
                         println!("parse_instruction: {}", instr);

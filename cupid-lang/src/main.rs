@@ -17,7 +17,7 @@ mod tests {
         let mut mach = VM::new();
 
         // Compiled from assembler.py
-        let bytes = include_bytes!("../../testfiles/jeq.bc");
+        let bytes = include_bytes!("../../testfiles/test.bc");
 
         let code = bytes
             .iter()
