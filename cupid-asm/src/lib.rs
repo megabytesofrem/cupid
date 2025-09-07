@@ -33,4 +33,7 @@ pub enum Instr {
     RET = 0x12,
 
     HALT = 0xFF,
+
+    // Assembler specific operations
+    PUSHBZ = 0xBA,
 }

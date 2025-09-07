@@ -5,8 +5,10 @@ another:
   pushsz "hello"
   popsz
   pushsz "world"
-  j 0xcafebabe
+  // pushbz [0x01 0x02]
+  //j exit
 
+exit:
 
   // %rep(5)
   // nop

@@ -42,27 +42,25 @@ impl Assembler {
 
     // Copy and paste from src/runtime/machine.rs
     fn operand_count(&self, instr: u8) -> usize {
-        // 0xFF is a value which encoded that we need to handle it specially,
-        // there cannot ever be 255 operands for an instruction
         match instr {
-            0x00 => 0,    // nop
-            0x01 => 0xFF, // pushi <value>, handled specially (multi-byte)
-            0x02 => 0,    // pushsz <value>, handled specially (strings)
-            0x03 => 0,    // pushac
-            0x04 => 0,    // popi
-            0x05 => 0,    // popsz
-            0x08 => 0xFF, // jmp <address>, handled specially (multi-byte)
-            0x09 => 0xFF, // jmp <offset>
-            0x0A => 0xFF, // jeq <address>
-            0x0B => 0xFF, // jne <address>
-            0x0C => 0,    // add
-            0x0D => 0,    // sub
-            0x0E => 0,    // mul
-            0x0F => 0,    // div
-            0x10 => 0xFF, // call <address>
-            0x11 => 0,    // callnat <name>, handled specially (names)
-            0x12 => 0,    // ret
-            0xFF => 0,    // halt
+            0x00 => 0, // nop
+            0x01 => 0, // pushi <value>, handled specially
+            0x02 => 0, // pushsz <value>, handled specially (strings)
+            0x03 => 0, // pushac
+            0x04 => 0, // popi
+            0x05 => 0, // popsz
+            0x08 => 1, // jmp <address>, always 4 bytes
+            0x09 => 1, // jmp <offset>
+            0x0A => 1, // jeq <address>
+            0x0B => 1, // jne <address>
+            0x0C => 0, // add
+            0x0D => 0, // sub
+            0x0E => 0, // mul
+            0x0F => 0, // div
+            0x10 => 1, // call <address>
+            0x11 => 0, // callnat <name>, handled specially
+            0x12 => 0, // ret
+            0xFF => 0, // halt
             _ => 0,
         }
     }
@@ -159,6 +157,19 @@ impl Assembler {
                     self.ptr += s.len() + 1;
                 }
             }
+
+            // Assembler pseudo-instruction:
+            // pushbz [0x01 0x02] - push byte sequence
+            Instr::PUSHBZ => {
+                if let Some(Node::ByteSeq(bytes)) = args.first() {
+                    self.buffer.extend_from_slice(bytes);
+                } else {
+                    println!("assembler: Invalid argument for PUSHBZ: {:?}", args);
+
+                    return Err("PUSHBZ expects a byte sequence argument".into());
+                }
+            }
+
             Instr::JMP_ABS | Instr::JMP_REL | Instr::JEQ | Instr::JNE | Instr::CALL => {
                 self.encode_arg(&args[0])?;
             }
@@ -192,7 +203,10 @@ impl Assembler {
             Node::Directive(dir) => self.visit_directive(dir),
             Node::Instruction(instr, args) => self.visit_instruction(&instr, args.clone()),
             Node::Label(label) => self.visit_label(label),
-            _ => Err("Unknown AST node".into()),
+
+            Node::ByteSeq(_) | Node::Int(_) | Node::Str(_) | Node::Ident(_) => {
+                Err("Unexpected standalone argument node".into())
+            }
         }
     }
 

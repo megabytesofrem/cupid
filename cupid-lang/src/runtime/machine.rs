@@ -93,29 +93,31 @@ pub struct VM {
     pub stack: Vec<VMValue>,
 }
 
-impl From<u8> for Op {
-    fn from(byte: u8) -> Self {
+impl TryFrom<u8> for Op {
+    type Error = &'static str;
+
+    fn try_from(byte: u8) -> Result<Self, Self::Error> {
         match byte {
-            0x00 => Op::NOP,
-            0x01 => Op::PUSH_I,
-            0x02 => Op::PUSHSZ,
-            0x03 => Op::PUSHAC,
-            0x04 => Op::POP_I,
-            0x05 => Op::POP_SZ,
+            0x00 => Ok(Op::NOP),
+            0x01 => Ok(Op::PUSH_I),
+            0x02 => Ok(Op::PUSHSZ),
+            0x03 => Ok(Op::PUSHAC),
+            0x04 => Ok(Op::POP_I),
+            0x05 => Ok(Op::POP_SZ),
             // Jumping
-            0x08 => Op::JMP_ABS,
-            0x09 => Op::JMP_REL,
-            0x0A => Op::JEQ,
-            0x0B => Op::JNE,
-            0xFF => Op::HALT,
-            0x0C => Op::ADD,
-            0x0D => Op::SUB,
-            0x0E => Op::MUL,
-            0x0F => Op::DIV,
-            0x10 => Op::CALL,
-            0x11 => Op::CALL_NAT,
-            0x12 => Op::RET,
-            _ => unreachable!(),
+            0x08 => Ok(Op::JMP_ABS),
+            0x09 => Ok(Op::JMP_REL),
+            0x0A => Ok(Op::JEQ),
+            0x0B => Ok(Op::JNE),
+            0xFF => Ok(Op::HALT),
+            0x0C => Ok(Op::ADD),
+            0x0D => Ok(Op::SUB),
+            0x0E => Ok(Op::MUL),
+            0x0F => Ok(Op::DIV),
+            0x10 => Ok(Op::CALL),
+            0x11 => Ok(Op::CALL_NAT),
+            0x12 => Ok(Op::RET),
+            _ => Err("Unknown opcode"),
         }
     }
 }
@@ -165,10 +167,25 @@ impl VM {
         let opcode = self.program[self.ip as usize];
         let mut operands = Vec::new();
 
-        println!("fetch_decode: called for {:?}", opcode);
+        println!("fetch_decode: called for {:02X}", opcode);
 
-        match opcode {
-            0x02 => {
+        let op = match Op::try_from(opcode) {
+            Ok(op) => op,
+            Err(_) => {
+                println!(
+                    "ERROR: Unknown opcode {:02X} at address {:02X}",
+                    opcode, self.ip
+                );
+                println!(
+                    "Context: {:?}",
+                    &self.program[self.ip as usize..self.ip as usize + 8]
+                );
+                unreachable!()
+            }
+        };
+
+        match op {
+            Op::PUSHSZ => {
                 // pushsz <value>: read until null byte
                 let mut i = 1;
                 while (self.ip as usize + i) < self.program.len()
@@ -180,27 +197,21 @@ impl VM {
                 }
             }
 
-            0x08 | 0x10 | 0x0A | 0x0B => {
-                // jmp: read until null byte as address
-                // jeq: read until null byte as address
-                // jne: read until null byte as address
-                // call: read until null byte as address
+            Op::JMP_ABS | Op::CALL | Op::JEQ | Op::JNE => {
                 println!("fetch_decode: reading operands for {:?}", opcode);
 
-                // Read until NUL byte
-                let mut i = 1;
-                while (self.ip as usize + i) < self.program.len()
-                    && self.program[self.ip as usize + i] != 0
-                {
-                    let next = self.program[self.ip as usize + i] as u32;
-                    operands.push(next);
-                    i += 1;
-                }
+                // Always read 4 bytes, since we are little-endian
+                let addr_bytes = [
+                    self.program[self.ip as usize + 1],
+                    self.program[self.ip as usize + 2],
+                    self.program[self.ip as usize + 3],
+                    self.program[self.ip as usize + 4],
+                ];
 
-                // Convert individual bytes back to address (big-endian)
-                let address = construct_vm_addr!(operands);
+                // Construct an address from the byte array
+                let address = construct_vm_addr!(addr_bytes);
 
-                println!("fetch_decode: final address {:08X}", address);
+                println!("jmp_abs: jumping to address {:08X}", address);
 
                 // Replace operands with single address value
                 operands.clear();
@@ -215,7 +226,7 @@ impl VM {
         }
 
         VMOp {
-            opcode: opcode.into(),
+            opcode: opcode.try_into().unwrap(),
             operands: operands.into(),
         }
     }

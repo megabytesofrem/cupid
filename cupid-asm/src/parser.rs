@@ -173,6 +173,11 @@ where
                     let token = self.tokens.next().ok_or(ParseError::UnexpectedEof)?;
                     args.push(Node::Str(token.literal));
                 }
+                TokenKind::ByteSeq(ref bytes) => {
+                    let bytes = bytes.clone();
+                    self.tokens.next(); // consume
+                    args.push(Node::ByteSeq(bytes));
+                }
                 _ => break,
             }
         }
@@ -205,6 +210,11 @@ where
                     "callnat" => Ok(Node::Instruction(Instr::CALL_NAT, args)),
                     "ret" => Ok(Node::Instruction(Instr::RET, args)),
                     "halt" => Ok(Node::Instruction(Instr::HALT, args)),
+
+                    // Assembly pseudo-instructions
+                    // NOT an actual instruction, but a way to push a byte sequence onto the stack
+                    // in the same way as 'pushsz'
+                    "pushbz" => Ok(Node::Instruction(Instr::PUSHBZ, args)),
 
                     _ => {
                         println!("parse_instruction: {}", instr);

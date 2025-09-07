@@ -51,7 +51,10 @@ impl<'l> Lexer<'l> {
             reserved_words: vec![
                 "nop", "pushi", "pushsz", "pushac", "popi", "popsz",
                 "j", "jne", "jeq", "add", "sub", "mul", "div", "mod",
-                "call", "callnat", "ret", "halt"
+                "call", "callnat", "ret", "halt",
+
+                // Assembly pseudo-instructions
+                "pushbz",
             ],
         }
     }

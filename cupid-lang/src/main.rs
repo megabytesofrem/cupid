@@ -17,7 +17,7 @@ mod tests {
         let mut mach = VM::new();
 
         // Compiled from assembler.py
-        let bytes = include_bytes!("../../files/test.bc");
+        let bytes = include_bytes!("../../testfiles/test.bc");
 
         let code = bytes
             .iter()
@@ -29,4 +29,3 @@ mod tests {
         mach.dump_ctx();
     }
 }
-

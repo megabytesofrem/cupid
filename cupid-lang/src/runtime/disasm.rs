@@ -18,8 +18,9 @@ pub fn disasm_instruction(vm: &VM, addr: usize) -> (String, usize) {
                 len + 1, // +1 for the null terminator
             )
         }
-        0x03 => (format!("popi"), 1),
-        0x04 => (format!("popsz"), 1),
+        0x03 => (format!("pushac"), 1),
+        0x04 => (format!("popi"), 1),
+        0x05 => (format!("popsz"), 1),
         0x08 => {
             let len = read_variable_length(addr + 1, &vm.program);
             let address_bytes = &vm.program[addr + 1..addr + len + 1];
