@@ -33,7 +33,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-    let mut assembler = Assembler::new();
+    let root_path = args
+        .input
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let mut assembler = Assembler::new(&root_path);
     let bc = assembler.assemble(&ast)?;
 
     // Write output file

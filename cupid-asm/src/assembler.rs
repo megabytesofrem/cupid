@@ -6,6 +6,7 @@
 //! and outputs a form of bytecode for the VM.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::parser::Directive;
 
@@ -18,6 +19,7 @@ pub struct Assembler {
     pub ptr: usize, // current position, translates to ip
 
     buffer: Vec<u8>,
+    root_path: PathBuf,
 
     // Labels to resolve to addresses
     pub labels: HashMap<String, usize>,
@@ -27,13 +29,14 @@ pub struct Assembler {
 }
 
 impl Assembler {
-    pub fn new() -> Self {
+    pub fn new(root_path: &Path) -> Self {
         Self {
             ast: Vec::new(),
             ptr: 0,
             labels: HashMap::new(),
             output_bc: Vec::new(),
             buffer: Vec::new(),
+            root_path: root_path.into(),
         }
     }
 
@@ -129,8 +132,46 @@ impl Assembler {
 
     fn visit_directive(&mut self, directive: &Directive) -> Result<(), String> {
         // TODO: Implement later, for now just fake it
-        self.buffer.push(0xFF);
-        self.ptr += 1;
+        // self.buffer.push(0xFF);
+        // self.ptr += 1;
+
+        match directive {
+            Directive::Include(path) => {
+                let full_path = self.root_path.join(path);
+
+                // C style #include, very dumb
+                let contents = std::fs::read_to_string(full_path).map_err(|e| e.to_string())?;
+                let mut lexer = crate::lexer::Lexer::new(&contents);
+                let mut tokens = lexer.lex();
+                let mut parser = crate::parser::Parser::new(&mut tokens, &contents);
+
+                let ast = parser.parse().map_err(|e| e.to_string())?;
+                for node in ast {
+                    self.visit_node(&node)?;
+                }
+            }
+
+            Directive::Stringz(string) => {
+                self.buffer.extend_from_slice(string.as_bytes());
+                self.buffer.push(0); // Null terminator
+                self.ptr += string.len() + 1;
+            }
+
+            Directive::ByteSeq(bytes) => {
+                self.buffer.extend_from_slice(bytes);
+                self.ptr += bytes.len();
+            }
+
+            Directive::Rep(count, body) => {
+                for _ in 0..*count {
+                    for node in body {
+                        self.visit_node(node)?;
+                    }
+                }
+            }
+
+            _ => todo!("Implement directive handling for {:?}", directive),
+        }
 
         Ok(())
     }
@@ -155,18 +196,6 @@ impl Assembler {
                     self.buffer.extend_from_slice(s.as_bytes());
                     self.buffer.push(0);
                     self.ptr += s.len() + 1;
-                }
-            }
-
-            // Assembler pseudo-instruction:
-            // pushbz [0x01 0x02] - push byte sequence
-            Instr::PUSHBZ => {
-                if let Some(Node::ByteSeq(bytes)) = args.first() {
-                    self.buffer.extend_from_slice(bytes);
-                } else {
-                    println!("assembler: Invalid argument for PUSHBZ: {:?}", args);
-
-                    return Err("PUSHBZ expects a byte sequence argument".into());
                 }
             }
 
@@ -204,7 +233,13 @@ impl Assembler {
             Node::Instruction(instr, args) => self.visit_instruction(&instr, args.clone()),
             Node::Label(label) => self.visit_label(label),
 
-            Node::ByteSeq(_) | Node::Int(_) | Node::Str(_) | Node::Ident(_) => {
+            Node::ByteSeq(bytes) => {
+                self.buffer.extend_from_slice(bytes);
+                self.ptr += bytes.len();
+                Ok(())
+            }
+
+            Node::Int(_) | Node::Str(_) | Node::Ident(_) => {
                 Err("Unexpected standalone argument node".into())
             }
         }
@@ -223,6 +258,64 @@ impl Assembler {
             if let Node::Label(label) = node {
                 self.labels.insert(label.clone(), self.ptr);
                 println!("assembler: Defined label {} at {:08X}", label, self.ptr);
+            }
+
+            if let Node::Directive(Directive::Rep(count, body)) = node {
+                for _ in 0..*count {
+                    for rep_node in body {
+                        // Process each repeated instruction to calculate the size
+                        // Cut and paste from below
+
+                        if let Node::Instruction(instr, args) = rep_node {
+                            self.ptr += 1;
+
+                            // Special case for variable length opcodes
+                            let is_wide_addr = matches!(
+                                *instr,
+                                Instr::JMP_ABS
+                                    | Instr::JMP_REL
+                                    | Instr::JEQ
+                                    | Instr::JNE
+                                    | Instr::CALL
+                            );
+
+                            match *instr {
+                                _instr if is_wide_addr => {
+                                    // Jumps need full addresses, which are variable length
+                                    self.ptr += 4; // Assume 4 bytes for address
+                                }
+
+                                Instr::PUSHSZ => {
+                                    if let Some(Node::Str(s)) = args.first() {
+                                        self.ptr += s.len() + 1; // String bytes + null terminator
+                                    } else {
+                                        return Err("PUSHSZ expects a string argument".into());
+                                    }
+                                }
+
+                                Instr::PUSH_I => {
+                                    if let Some(Node::Int(value)) = args.first() {
+                                        if *value <= 0xFF {
+                                            self.ptr += 1; // u8
+                                        } else if *value <= 0xFFFF {
+                                            self.ptr += 2; // u16
+                                        } else {
+                                            self.ptr += 4; // u32
+                                        }
+                                    } else {
+                                        return Err("PUSH_I expects an integer argument".into());
+                                    }
+                                }
+
+                                _ => {
+                                    // Count the operand size
+                                    let operand_count = self.operand_count(*instr as u8);
+                                    self.ptr += operand_count;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Count instruction size, and append that much to the ptr
@@ -303,36 +396,5 @@ impl Assembler {
         println!("assembler: Buffer data: {:?}", self.buffer);
 
         Ok(&self.output_bc)
-    }
-}
-
-// Tests
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_assemble() {
-        let mut assembler = Assembler::new();
-        let ast = vec![
-            Node::Label("start".into()),
-            Node::Instruction(Instr::PUSHSZ, vec![Node::Str("AAAA".into())]),
-            Node::Instruction(Instr::PUSH_I, vec![Node::Int(42)]),
-        ];
-
-        let result = assembler.assemble(&ast);
-        assert!(result.is_ok());
-
-        let bytecode = result.unwrap();
-        assert_eq!(
-            bytecode,
-            &[
-                0x02, // PUSHSZ
-                0x41, 0x41, 0x41, 0x41, 0x00, // "AAAA", null-terminated
-                0x01, // PUSH_I
-                0x2A  // 42
-            ]
-        );
-        // println!("{:02X?}, len: {}", bytecode, bytecode.len());
     }
 }

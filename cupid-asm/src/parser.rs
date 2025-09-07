@@ -211,11 +211,6 @@ where
                     "ret" => Ok(Node::Instruction(Instr::RET, args)),
                     "halt" => Ok(Node::Instruction(Instr::HALT, args)),
 
-                    // Assembly pseudo-instructions
-                    // NOT an actual instruction, but a way to push a byte sequence onto the stack
-                    // in the same way as 'pushsz'
-                    "pushbz" => Ok(Node::Instruction(Instr::PUSHBZ, args)),
-
                     _ => {
                         println!("parse_instruction: {}", instr);
 

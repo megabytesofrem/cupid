@@ -1,2 +1,1 @@
-part2:
-  pushi 6
+pushi 6
