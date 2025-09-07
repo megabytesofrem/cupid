@@ -172,6 +172,12 @@ impl<'l> Lexer<'l> {
             }
         }
 
+        if self.peek() == ']' {
+            self.advance(); // consume closing ']'
+        } else {
+            panic!("Unterminated byte sequence");
+        }
+
         Token {
             kind: TokenKind::ByteSeq(bytes.clone()),
             literal: format!("{:?}", bytes),
@@ -181,7 +187,24 @@ impl<'l> Lexer<'l> {
     fn lex_string(&mut self) -> Token {
         let mut value = String::new();
         while self.peek() != '"' && self.peek() != '\'' && self.peek() != '\0' {
-            value.push(self.advance());
+            let c = self.advance();
+            match c {
+                '\\' => {
+                    let c = self.advance();
+                    // Handle character escape sequences
+                    match c {
+                        '\\' => value.push('\\'),
+                        '0' => value.push(0 as char),
+                        'n' => value.push('\n'),
+                        'r' => value.push('\r'),
+                        't' => value.push('\t'),
+                        _ => value.push(c),
+                    }
+                }
+                _ => {
+                    value.push(c);
+                }
+            }
         }
 
         // Check for closing quote, consume and advance
@@ -260,6 +283,11 @@ impl<'l> Lexer<'l> {
                     while self.peek() != '\n' && self.peek() != '\0' {
                         self.advance();
                     }
+                }
+
+                '[' => {
+                    self.advance();
+                    tokens.push(self.lex_byte_seq());
                 }
 
                 '0'..='9' => {

@@ -23,6 +23,7 @@ pub struct Assembler {
 
     // Labels to resolve to addresses
     pub labels: HashMap<String, usize>,
+    pub consts: HashMap<String, Node>,
 
     // Output bytecode
     pub output_bc: Vec<u8>,
@@ -34,6 +35,7 @@ impl Assembler {
             ast: Vec::new(),
             ptr: 0,
             labels: HashMap::new(),
+            consts: HashMap::new(),
             output_bc: Vec::new(),
             buffer: Vec::new(),
             root_path: root_path.into(),
@@ -96,8 +98,12 @@ impl Assembler {
                     self.ptr += 4;
 
                     Ok(*addr)
+                } else if let Some(const_value) = self.consts.get(label) {
+                    // Inline constant value
+                    let const_value = const_value.clone();
+                    self.encode_arg(&const_value)
                 } else {
-                    Err("Undefined label".into())
+                    Err(format!("Undefined label or constant: {}", label))
                 }
             }
             Node::Int(value) => {
@@ -136,6 +142,10 @@ impl Assembler {
         // self.ptr += 1;
 
         match directive {
+            Directive::Define(name, value) => {
+                self.consts.insert(name.clone(), *value.clone());
+            }
+
             Directive::Include(path) => {
                 let full_path = self.root_path.join(path);
 
@@ -169,8 +179,6 @@ impl Assembler {
                     }
                 }
             }
-
-            _ => todo!("Implement directive handling for {:?}", directive),
         }
 
         Ok(())
@@ -181,11 +189,22 @@ impl Assembler {
         self.ptr += 1;
 
         // Push all arguments encoded
-        // TODO: We need to handle 0xFF as a special case
         match *instr {
             Instr::PUSH_I => {
                 if let Some(Node::Int(value)) = args.first() {
                     self.push_sized_int(*value as usize);
+                } else if let Some(Node::Ident(label)) = args.first() {
+                    let const_value = self
+                        .consts
+                        .get(label)
+                        .cloned()
+                        .ok_or(format!("Undefined constant: {}", label))?;
+
+                    if let Node::Int(value) = const_value {
+                        self.push_sized_int(value as usize);
+                    } else {
+                        return Err("PUSH_I expects an integer argument".into());
+                    }
                 } else {
                     return Err("PUSH_I expects an integer argument".into());
                 }
@@ -196,6 +215,8 @@ impl Assembler {
                     self.buffer.extend_from_slice(s.as_bytes());
                     self.buffer.push(0);
                     self.ptr += s.len() + 1;
+                } else if let Some(arg) = args.first() {
+                    self.encode_arg(arg)?;
                 }
             }
 
@@ -252,6 +273,35 @@ impl Assembler {
         Ok(())
     }
 
+    fn resolve_const_pass(&mut self, ast: &Ast) -> Result<(), String> {
+        for node in ast {
+            if let Node::Directive(Directive::Define(name, value)) = node {
+                self.consts.insert(name.clone(), *value.clone());
+                println!("assembler: Defined constant {} as {:?}", name, value);
+            }
+        }
+        Ok(())
+    }
+
+    fn count_size(&self, value: &Node) -> usize {
+        match value {
+            Node::Str(s) => s.len() + 1, // String bytes + null terminator
+            Node::Int(value) => {
+                if *value <= 0xFF {
+                    1 // u8
+                } else if *value <= 0xFFFF {
+                    2 // u16
+                } else {
+                    4 // u32
+                }
+            }
+            Node::ByteSeq(bytes) => bytes.len(),
+            Node::Ident(ident) => ident.len(),
+
+            _ => 0,
+        }
+    }
+
     // Pass to resolve labels to addresses
     fn resolve_label_pass(&mut self, ast: &Ast) -> Result<(), String> {
         for node in ast {
@@ -269,8 +319,8 @@ impl Assembler {
                         if let Node::Instruction(instr, args) = rep_node {
                             self.ptr += 1;
 
-                            // Special case for variable length opcodes
-                            let is_wide_addr = matches!(
+                            // Special case for 4 byte opcodes
+                            let four_bytes = matches!(
                                 *instr,
                                 Instr::JMP_ABS
                                     | Instr::JMP_REL
@@ -280,7 +330,7 @@ impl Assembler {
                             );
 
                             match *instr {
-                                _instr if is_wide_addr => {
+                                _instr if four_bytes => {
                                     // Jumps need full addresses, which are variable length
                                     self.ptr += 4; // Assume 4 bytes for address
                                 }
@@ -288,6 +338,14 @@ impl Assembler {
                                 Instr::PUSHSZ => {
                                     if let Some(Node::Str(s)) = args.first() {
                                         self.ptr += s.len() + 1; // String bytes + null terminator
+                                    } else if let Some(Node::Ident(label)) = args.first() {
+                                        let const_value = self
+                                            .consts
+                                            .get(label)
+                                            .cloned()
+                                            .ok_or(format!("Undefined constant: {}", label))?;
+
+                                        self.ptr += self.count_size(&const_value);
                                     } else {
                                         return Err("PUSHSZ expects a string argument".into());
                                     }
@@ -302,6 +360,14 @@ impl Assembler {
                                         } else {
                                             self.ptr += 4; // u32
                                         }
+                                    } else if let Some(Node::Ident(label)) = args.first() {
+                                        let const_value = self
+                                            .consts
+                                            .get(label)
+                                            .cloned()
+                                            .ok_or(format!("Undefined constant: {}", label))?;
+
+                                        self.ptr += self.count_size(&const_value);
                                     } else {
                                         return Err("PUSH_I expects an integer argument".into());
                                     }
@@ -322,23 +388,23 @@ impl Assembler {
             if let Node::Instruction(instr, args) = node {
                 self.ptr += 1; // Count the instruction itself
 
-                // Special case for variable length opcodes
-                let is_wide_addr = matches!(
+                // Special case for 4 byte opcodes
+                let four_bytes = matches!(
                     *instr,
                     Instr::JMP_ABS | Instr::JMP_REL | Instr::JEQ | Instr::JNE | Instr::CALL
                 );
 
                 match *instr {
-                    _instr if is_wide_addr => {
-                        // Jumps need full addresses, which are variable length
+                    _instr if four_bytes => {
+                        // Jumps need full addresses
                         self.ptr += 4; // Assume 4 bytes for address
                     }
 
                     Instr::PUSHSZ => {
                         if let Some(Node::Str(s)) = args.first() {
                             self.ptr += s.len() + 1; // String bytes + null terminator
-                        } else {
-                            return Err("PUSHSZ expects a string argument".into());
+                        } else if let Some(arg) = args.first() {
+                            self.ptr += self.count_size(arg);
                         }
                     }
 
@@ -351,6 +417,8 @@ impl Assembler {
                             } else {
                                 self.ptr += 4; // u32
                             }
+                        } else if let Some(arg) = args.first() {
+                            self.ptr += self.count_size(arg);
                         } else {
                             return Err("PUSH_I expects an integer argument".into());
                         }
@@ -377,6 +445,8 @@ impl Assembler {
         self.ptr = 0;
         self.labels.clear();
         self.buffer.clear();
+
+        self.resolve_const_pass(&ast)?;
 
         self.resolve_label_pass(&ast)?;
 

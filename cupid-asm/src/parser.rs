@@ -159,6 +159,8 @@ where
     fn parse_args(&mut self) -> ParseResult<Vec<Node>> {
         let mut args = Vec::new();
         while let Some(token) = self.tokens.peek() {
+            println!("got a {:?}", token.kind);
+
             match token.kind {
                 TokenKind::Ident(ref name) => {
                     let name = name.clone();
