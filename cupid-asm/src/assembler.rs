@@ -1,7 +1,6 @@
 //! Assembler for Cupids bytecode
 //!
 //! Bytecode assembler.
-//!
 //! Takes the generated AST from the parser, resolves labels, inlines data declarations
 //! and outputs a form of bytecode for the VM.
 
@@ -10,19 +9,19 @@ use std::path::{Path, PathBuf};
 
 use crate::parser::Directive;
 
-use super::Instr;
 use super::parser::{Ast, Node};
+use super::Instr;
 
 #[macro_export]
 macro_rules! def_opcode {
     ($self:ident, $mme:ident, $opcode:expr, $operand_count:expr) => {
         $self
-            .operand_table
+            .opcode_table
             .push((stringify!($mme).to_string(), ($opcode, $operand_count)));
     };
     ($self:ident, $mme:ident, $opcode:expr, $operand_count:expr, $desc:expr) => {
         $self
-            .operand_table
+            .opcode_table
             .push((stringify!($mme).to_string(), ($opcode, $operand_count)));
     };
 }
@@ -30,7 +29,7 @@ macro_rules! def_opcode {
 macro_rules! find_opcode {
     ($self:ident, $mme:expr) => {
         $self
-            .operand_table
+            .opcode_table
             .iter()
             .find(|(name, _)| name == $mme)
             .map(|(_, (opcode, operand_count))| (*opcode, *operand_count))
@@ -38,7 +37,7 @@ macro_rules! find_opcode {
 
     ($self:ident, $opcode:expr, opcode) => {
         $self
-            .operand_table
+            .opcode_table
             .iter()
             .find(|(_, (code, _))| *code == $opcode)
             .map(|(name, (_, operand_count))| (name.clone(), *operand_count))
@@ -48,33 +47,11 @@ macro_rules! find_opcode {
 macro_rules! find_opcode_size {
     ($self:ident, $mme:expr) => {
         $self
-            .operand_table
+            .opcode_table
             .iter()
             .find(|(name, _)| name == $mme)
             .map(|(_, (_, size))| *size)
             .unwrap_or(0)
-    };
-}
-
-macro_rules! visit_push_int {
-    ($self:ident, $instr:expr, $args:expr, $size:expr) => {
-        if let Some(Node::Int(value)) = $args.first() {
-            $self.push_sized_int(*value as u32, $size);
-        } else if let Some(Node::Ident(label)) = $args.first() {
-            let const_value = $self
-                .consts
-                .get(label)
-                .cloned()
-                .ok_or(format!("Undefined constant: {}", label))?;
-
-            if let Node::Int(value) = const_value {
-                $self.push_sized_int(value as u32, $size);
-            } else {
-                return Err(format!("{:?} expects an integer argument", $instr));
-            }
-        } else {
-            return Err(format!("{:?} expects an integer argument", $instr));
-        }
     };
 }
 
@@ -83,7 +60,9 @@ pub struct Assembler {
     pub ast: Ast,   // maybe make this a Rc type, so we dont need to '.clone' as much?
     pub ptr: usize, // current position, translates to ip
 
-    operand_table: Vec<(String, (u8, usize))>, // opcode, operand count
+    // Store the operands in a table along with their description
+    opcode_table: Vec<(String, (u8, usize))>, // opcode, operand count
+    
     buffer: Vec<u8>,
     root_path: PathBuf,
 
@@ -105,12 +84,12 @@ impl Assembler {
             output_bc: Vec::new(),
             buffer: Vec::new(),
             root_path: root_path.into(),
-            operand_table: Vec::new(),
+            opcode_table: Vec::new(),
         }
     }
 
     #[rustfmt::skip]
-    pub fn make_operand_table(&mut self) {
+    pub fn make_opcode_table(&mut self) {
         //                mme       opcode operand_count description
         def_opcode!(self, nop,      0x00,   0,           "no-op");
         def_opcode!(self, push8,    0x01,   1,           "push immediate value (byte)");
@@ -243,7 +222,7 @@ impl Assembler {
             }
             Node::Int(value) => {
                 // VM expects 4 byte addresses
-                self.encode_int_operand(*value as u32, 4);
+                self.encode_int_operand(*value, 4);
                 Ok(*value as usize)
             }
             Node::Str(value) => {
@@ -285,6 +264,40 @@ impl Assembler {
             // u32
             self.buffer.extend_from_slice(&value.to_le_bytes());
             self.ptr += 4;
+        }
+    }
+
+    fn visit_push_int(
+        &mut self,
+        size: usize,
+        instr: &Instr,
+        args: Vec<Node>,
+    ) -> Result<(), String> {
+        match args.first() {
+            Some(node) => match node {
+                Node::Int(value) => {
+                    self.push_sized_int(*value, size);
+                    Ok(())
+                }
+
+                Node::Ident(label) => {
+                    let const_value = self
+                        .consts
+                        .get(label)
+                        .cloned()
+                        .ok_or(format!("Undefined constant: {}", label))?;
+                    if let Node::Int(value) = const_value {
+                        self.push_sized_int(value, size);
+                        Ok(())
+                    } else {
+                        Err(format!("{:?} expects an integer operand", instr))
+                    }
+                }
+
+                _ => Err(format!("{:?} expects an integer operand", instr)),
+            },
+
+            None => Err(format!("{:?} expects an integer operand", instr)),
         }
     }
 
@@ -343,15 +356,15 @@ impl Assembler {
         // Push all arguments encoded
         match *instr {
             Instr::PUSH8 => {
-                visit_push_int!(self, instr, args, 1);
+                self.visit_push_int(1, instr, args)?;
             }
 
             Instr::PUSH16 => {
-                visit_push_int!(self, instr, args, 2);
+                self.visit_push_int(2, instr, args)?;
             }
 
             Instr::PUSH32 => {
-                visit_push_int!(self, instr, args, 4);
+                self.visit_push_int(4, instr, args)?;
             }
 
             Instr::PUSHSZ => {
@@ -469,9 +482,9 @@ impl Assembler {
         self.labels.clear();
         self.buffer.clear();
 
-        self.resolve_const_pass(&ast)?;
+        self.resolve_const_pass(ast)?;
 
-        self.resolve_label_pass(&ast)?;
+        self.resolve_label_pass(ast)?;
 
         println!("assembler: Resolved labels: {:?}", self.labels);
         println!("assembler: Total bytecode size: {}", self.ptr);

@@ -103,25 +103,49 @@ fn format_address(bytes: &[u8]) -> u32 {
 pub fn dump_memory(vm: &VM, start: usize, end: usize) {
     let end = end.min(vm.program.len());
     let mut addr = start;
+
     while addr < end {
         print!("{:04X}: ", addr);
 
-        let mut line_bytes = 0;
-        while line_bytes < 8 && addr + line_bytes < end {
-            let (disasm, size) = disasm_instruction(vm, addr + line_bytes);
-            // Print the bytes for this instruction
+        let mut line_content = String::new();
+        let mut bytes_on_line = 0;
+        const MAX_BYTES_PER_LINE: usize = 8;
+
+        // Process instructions until we fill the line or reach the end
+        while addr < end && bytes_on_line < MAX_BYTES_PER_LINE {
+            let (disasm, size) = disasm_instruction(vm, addr);
+
+            // Check if this instruction would exceed the line limit
+            if bytes_on_line > 0 && bytes_on_line + size > MAX_BYTES_PER_LINE {
+                break; // Start a new line
+            }
+
+            // Format the bytes for this instruction
+            let mut byte_str = String::new();
             for i in 0..size {
-                if addr + line_bytes + i < end {
-                    print!("{:02X} ", vm.program[addr + line_bytes + i]);
+                if addr + i < end {
+                    byte_str.push_str(&format!("{:02X} ", vm.program[addr + i]));
                 }
             }
-            print!(": {}    ", disasm);
 
-            line_bytes += size;
+            // Calculate padding to align the colon and mnemonic
+            let byte_width = size * 3; // Each byte is "XX " (3 chars)
+            let padding = if byte_width < 12 { 12 - byte_width } else { 1 };
+
+            // Add this instruction to the line with proper formatting
+            line_content.push_str(&format!(
+                "{}:{:width$}{}    ",
+                byte_str.trim_end(),
+                "",
+                disasm,
+                width = padding
+            ));
+
+            addr += size;
+            bytes_on_line += size;
         }
 
-        println!();
-        addr += line_bytes;
+        println!("{}", line_content.trim_end());
     }
 }
 

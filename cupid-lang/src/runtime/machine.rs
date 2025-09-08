@@ -464,12 +464,12 @@ impl VM {
     }
 
     pub fn dump_ctx(&self) {
-        println!("--------------------------");
+        println!("------------------------------------------------------------");
         println!(
             "ip: {:08X}\tsp: {:08X}\tac: {:08X}\tbp: {:08X}",
             self.ip, self.sp, self.ac, self.bp
         );
-        println!("--------------------------");
+        println!("------------------------------------------------------------");
         disasm::dump_memory(self, 0, 64);
 
         disasm::dump_stack(self);

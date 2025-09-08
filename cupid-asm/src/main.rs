@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| PathBuf::from("."));
 
     let mut assembler = Assembler::new(&root_path);
-    assembler.make_operand_table();
+    assembler.make_opcode_table();
 
     let bc = assembler.assemble(&ast)?;
 

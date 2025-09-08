@@ -52,3 +52,20 @@ the base pointer.
 
 The return address points to the address after the `call` instruction, so we can jump past
 the call site when we are done.
+
+## Disasm format
+```
+0000: 01 12 : push8 18      02 34 12 : push16 4660    
+Stack (sp=0):
+  [0]: 18
+  [1]: 4660
+------------------------------------------------------------
+ip: 00000006    sp: 00000000    ac: 00000000    bp: 00000000
+------------------------------------------------------------
+0000: 01 12 : push8 18      02 34 12 : push16 4660    
+Stack (sp=0):
+  [0]: 18
+  [1]: 4660
+
+
+```
